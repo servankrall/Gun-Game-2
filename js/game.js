@@ -6,6 +6,7 @@ import { buildMapBlocks, HALF } from './map.js';
 // Constants
 // ============================================================
 const EYE = 1.62, P_HALF = 0.3, P_HEIGHT = 1.8;
+const SPAWN_NOBUILD_X = 22; // no player-built blocks where |x| >= this (protects both spawns)
 const GRAVITY = 23, JUMP_V = 8.6, WALK = 5.8, SPRINT = 8.4;
 const SENS = 0.0023;
 
@@ -232,10 +233,10 @@ function handleMsg(m) {
       initVoice();
       break;
     }
-    case 'join': addRemote(m.p); feed(`${m.p.name} joined the game`, m.p.team); break;
+    case 'join': addRemote(m.p); if (!m.p.bot) feed(`${m.p.name} joined the game`, m.p.team); break;
     case 'leave': {
       const r = remotes.get(m.id);
-      if (r) { feed(`${r.name} left`, r.team); scene.remove(r.group); remotes.delete(m.id); }
+      if (r) { if (!r.bot) feed(`${r.name} left`, r.team); scene.remove(r.group); remotes.delete(m.id); }
       closeVoicePeer(m.id);
       break;
     }
@@ -360,6 +361,7 @@ function handleMsg(m) {
       $('scoreBlue').textContent = scores.blue;
       killStreak = 0;
       hideMatchOver();
+      resetWorld();
       feed('New match — first to ' + scoreLimit + ' wins!', myTeam);
       break;
   }
@@ -589,6 +591,23 @@ function removeBlockLocal(x, y, z, silent) {
 
 const solid = (x, y, z) => collision.has(`${x},${y},${z}`);
 
+// Restore the arena to its pristine layout (called on match reset — the server
+// clears all placed/destroyed blocks, so the client must rebuild to match).
+function resetWorld() {
+  for (const [k, mesh] of placedMeshes) { scene.remove(mesh); mesh.geometry.dispose(); collision.delete(k); }
+  placedMeshes.clear();
+  const m4 = new THREE.Matrix4();
+  const dirty = new Set();
+  for (const [k, mi] of mapBlockIndex) {
+    const c = k.split(','); const x = +c[0], y = +c[1], z = +c[2];
+    m4.makeTranslation(x + 0.5, y + 0.5, z + 0.5);
+    mi.mesh.setMatrixAt(mi.i, m4);
+    dirty.add(mi.mesh);
+    collision.add(k);
+  }
+  for (const mesh of dirty) mesh.instanceMatrix.needsUpdate = true;
+}
+
 // ============================================================
 // Remote players (blocky characters)
 // ============================================================
@@ -675,7 +694,7 @@ function addRemote(p) {
     target: new THREE.Vector3(p.pos.x, p.pos.y, p.pos.z),
     try: p.ry, trx: p.rx || 0, anim: 0, phase: 0,
     alive: p.alive, hp: p.hp, kills: p.kills || 0, deaths: p.deaths || 0,
-    shootAnim: 0,
+    shootAnim: 0, bot: !!p.bot,
   });
 }
 
@@ -895,6 +914,7 @@ function tryPlaceBlock() {
   if (!hit) return;
   const nx = hit.x + hit.normal[0], ny = hit.y + hit.normal[1], nz = hit.z + hit.normal[2];
   if (ny < 1 || ny > 20 || Math.abs(nx) > HALF + 1 || Math.abs(nz) > HALF + 1) return;
+  if (Math.abs(nx) >= SPAWN_NOBUILD_X) { feed('Cannot build in spawn zones', myTeam); return; } // anti-trap
   if (collision.has(`${nx},${ny},${nz}`)) return;
   // don't place inside yourself or others
   const bx = nx + 0.5, bz = nz + 0.5;

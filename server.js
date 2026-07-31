@@ -225,6 +225,7 @@ export class GameServer extends DurableObject {
         break;
       }
       case 'place': {
+        if (Math.abs(m.x) >= 22) break; // no building in spawn zones (anti-trap) — matches client
         const key = `${m.x},${m.y},${m.z}`;
         r.destroyed.delete(key); r.placed.set(key, { x: m.x, y: m.y, z: m.z, team: p.team });
         this.broadcastExcept(r, id, { t: 'place', x: m.x, y: m.y, z: m.z, team: p.team });
