@@ -56,8 +56,14 @@ let tabHeld = false;
 let chatOpen = false;
 
 // Mobile / touch input
-let mobile = false, mobileSprint = false;
+let mobile = false, mobileSprint = false, sprintHeld = false;
 const mobileMove = { x: 0, z: 0, active: false };
+
+// Room / match / feel
+let myRoom = (new URLSearchParams(location.search).get('room') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
+let scoreLimit = 40;
+let killStreak = 0;
+let lookMul = parseFloat(localStorage.getItem('bf_sens') || '1') || 1;
 
 const tracers = [], particles = [], flashes = [], rockets = [];
 
@@ -143,6 +149,33 @@ function setupMenu() {
   };
   btn.addEventListener('click', start);
   input.addEventListener('keydown', e => { if (e.key === 'Enter') start(); });
+
+  // sensitivity slider (persisted)
+  const sr = $('sensRange'), lbl = $('sensVal');
+  if (sr) {
+    sr.value = lookMul; if (lbl) lbl.textContent = lookMul.toFixed(2) + 'x';
+    sr.addEventListener('input', () => {
+      lookMul = parseFloat(sr.value) || 1;
+      localStorage.setItem('bf_sens', String(lookMul));
+      if (lbl) lbl.textContent = lookMul.toFixed(2) + 'x';
+    });
+  }
+
+  // private room invite: generate a room code if none, copy the link
+  const inv = $('inviteBtn');
+  if (inv) inv.addEventListener('click', () => {
+    if (!myRoom) {
+      myRoom = Math.random().toString(36).slice(2, 8);
+      const u = new URL(location.href); u.searchParams.set('room', myRoom);
+      history.replaceState(null, '', u);
+    }
+    const link = location.href;
+    if (navigator.clipboard) navigator.clipboard.writeText(link).then(() => {
+      inv.textContent = 'LINK COPIED ✓'; setTimeout(() => inv.textContent = 'INVITE FRIENDS', 1600);
+    }).catch(() => { inv.textContent = link; });
+    else inv.textContent = link;
+  });
+  if (myRoom && inv) inv.textContent = 'ROOM: ' + myRoom + ' (copy link)';
 }
 
 // ============================================================
@@ -154,7 +187,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -189,6 +222,8 @@ function handleMsg(m) {
       me.pos.set(m.pos.x, m.pos.y, m.pos.z);
       me.ry = m.ry; me.rx = 0;
       Object.assign(scores, m.scores);
+      scoreLimit = m.scoreLimit || 40;
+      updateCount(m.count);
       for (const p of m.players) addRemote(p);
       // destroyed map blocks first, then player-built blocks (a built block may occupy a destroyed spot)
       for (const d of m.destroyed || []) removeBlockLocal(d.x, d.y, d.z, true);
@@ -263,11 +298,12 @@ function handleMsg(m) {
       if (killer) killer.kills++;
       if (m.victim === myId) {
         me.hp = 0; me.dead = true; me.deaths++;
+        killStreak = 0;
         updateHearts();
         SND.death();
         showDeathScreen(kName);
       }
-      if (m.killer === myId) { me.kills++; SND.kill(); }
+      if (m.killer === myId && m.victim !== myId) { me.kills++; SND.kill(); onMyKill(); }
       break;
     }
     case 'respawn': {
@@ -312,7 +348,50 @@ function handleMsg(m) {
     case 'chat':
       addChatMessage(m.name, m.team, m.text);
       break;
+    case 'roster':
+      updateCount(m.count);
+      break;
+    case 'matchover':
+      showMatchOver(m.winner, m.scores);
+      break;
+    case 'matchstart':
+      Object.assign(scores, m.scores);
+      $('scoreRed').textContent = scores.red;
+      $('scoreBlue').textContent = scores.blue;
+      killStreak = 0;
+      hideMatchOver();
+      feed('New match — first to ' + scoreLimit + ' wins!', myTeam);
+      break;
   }
+}
+
+// ---- player count / match banners / kill streak (HUD helpers) ----
+function updateCount(n) {
+  if (typeof n !== 'number') return;
+  const el = $('playerCount');
+  if (el) el.textContent = '◉ ' + n;
+}
+function showMatchOver(winner, sc) {
+  if (sc) { Object.assign(scores, sc); $('scoreRed').textContent = scores.red; $('scoreBlue').textContent = scores.blue; }
+  const o = $('matchOver');
+  const win = (winner === myTeam);
+  $('matchOverTitle').textContent = (winner === 'red' ? 'RED' : 'BLUE') + ' TEAM WINS';
+  $('matchOverTitle').style.color = TEAM_COL[winner] || '#fff';
+  $('matchOverSub').textContent = (win ? 'Victory! ' : 'Defeat. ') + `${scores.red} : ${scores.blue}  —  next match starting...`;
+  o.style.display = 'flex';
+}
+function hideMatchOver() { const o = $('matchOver'); if (o) o.style.display = 'none'; }
+function announce(text, color) {
+  const el = $('announce');
+  if (!el) return;
+  el.textContent = text; el.style.color = color || '#ffdd55';
+  el.style.animation = 'none'; void el.offsetWidth; el.style.animation = 'annce 1.3s ease-out';
+}
+const STREAK_NAMES = { 2: 'DOUBLE KILL', 3: 'TRIPLE KILL', 4: 'RAMPAGE', 5: 'UNSTOPPABLE', 7: 'GODLIKE' };
+function onMyKill() {
+  killStreak++;
+  const nm = STREAK_NAMES[killStreak] || (killStreak > 7 ? 'GODLIKE' : null);
+  if (nm) announce(nm, '#ff7733');
 }
 
 // ============================================================
@@ -640,7 +719,7 @@ function collideAxis(pos, axis) {
 }
 
 function movePlayer(dt) {
-  const sprint = keys['ShiftLeft'] || keys['ShiftRight'] || mobileSprint;
+  const sprint = keys['ShiftLeft'] || keys['ShiftRight'] || mobileSprint || sprintHeld;
   const speed = sprint ? SPRINT : WALK;
   let fx = 0, fz = 0;
   if (keys['KeyW']) fz -= 1;
@@ -1303,8 +1382,8 @@ function setupInput() {
   });
   document.addEventListener('mousemove', e => {
     if (!locked || me.dead) return;
-    me.ry -= e.movementX * SENS;
-    me.rx -= e.movementY * SENS * (me.zoomed ? 0.5 : 1);
+    me.ry -= e.movementX * SENS * lookMul;
+    me.rx -= e.movementY * SENS * lookMul * (me.zoomed ? 0.5 : 1);
     me.rx = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, me.rx));
   });
   document.addEventListener('mousedown', e => {
@@ -1344,6 +1423,7 @@ function setupTouch() {
   if (!coarse && !('ontouchstart' in window && innerWidth < 1024)) return;
   mobile = true;
   $('touch').style.display = 'block';
+  $('rotateHint').classList.add('armed'); // CSS shows it only in portrait
 
   const joyWrap = $('joyWrap'), knob = $('joyKnob');
   const R = 52;
@@ -1385,8 +1465,8 @@ function setupTouch() {
     for (const t of e.changedTouches) {
       if (t.identifier === joyId) { moveJoy(t.clientX - jcx, t.clientY - jcy); e.preventDefault(); }
       else if (t.identifier === lookId && !me.dead) {
-        me.ry -= (t.clientX - lx) * TOUCH_SENS;
-        me.rx -= (t.clientY - ly) * TOUCH_SENS * (me.zoomed ? 0.5 : 1);
+        me.ry -= (t.clientX - lx) * TOUCH_SENS * lookMul;
+        me.rx -= (t.clientY - ly) * TOUCH_SENS * lookMul * (me.zoomed ? 0.5 : 1);
         me.rx = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, me.rx));
         lx = t.clientX; ly = t.clientY; e.preventDefault();
       }
@@ -1411,6 +1491,7 @@ function setupTouch() {
   press('btnJump', () => { keys['Space'] = true; }, () => { keys['Space'] = false; });
   press('btnReload', () => startReload());
   press('btnAim', () => { me.zoomed = !me.zoomed; });
+  press('btnSprint', () => { sprintHeld = true; }, () => { sprintHeld = false; });
 
   // voice: tap to toggle mic on/off (mobile has no push-to-talk V key)
   const bv = $('btnVoice');
@@ -1493,6 +1574,32 @@ function startGame() {
 }
 
 // ============================================================
+// Minimap (top-down radar, rotated so the player faces up)
+// ============================================================
+let miniCtx = null, lastMini = 0;
+function drawMinimap() {
+  const cv = $('minimap'); if (!cv) return;
+  if (!miniCtx) miniCtx = cv.getContext('2d');
+  const g = miniCtx, W = cv.width, R = W / 2, scale = R / 42;
+  const ca = Math.cos(me.ry), sa = Math.sin(me.ry);
+  g.clearRect(0, 0, W, W);
+  g.fillStyle = 'rgba(0,0,0,0.5)'; g.beginPath(); g.arc(R, R, R - 1, 0, Math.PI * 2); g.fill();
+  const plot = (wx, wz) => {
+    const dx = wx - me.pos.x, dz = wz - me.pos.z;
+    return [R + (dx * ca - dz * sa) * scale, R + (dx * sa + dz * ca) * scale];
+  };
+  for (const r of remotes.values()) {
+    if (!r.alive) continue;
+    const [px, py] = plot(r.group.position.x, r.group.position.z);
+    if (Math.hypot(px - R, py - R) > R - 2) continue;
+    g.fillStyle = r.team === myTeam ? '#66ccff' : '#ff5555';
+    g.beginPath(); g.arc(px, py, 2.6, 0, Math.PI * 2); g.fill();
+  }
+  g.fillStyle = '#fff';
+  g.beginPath(); g.moveTo(R, R - 5); g.lineTo(R - 4, R + 4); g.lineTo(R + 4, R + 4); g.closePath(); g.fill();
+}
+
+// ============================================================
 // Main loop
 // ============================================================
 let lastNetSend = 0, lastAnim = 0;
@@ -1529,6 +1636,7 @@ function loop() {
     updateFx(dt);
     updateViewModel(dt, moving > 0);
     if (tabHeld) updateScoreboard();
+    if (now - lastMini > 90) { lastMini = now; drawMinimap(); }
 
     // clouds drift
     scene.traverse(o => {

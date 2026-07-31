@@ -208,6 +208,33 @@
   #btnVoice.on { background: rgba(44,140,44,.6); border-color: #4d4; }
   /* let mobile players tap the hotbar to switch weapons (the HUD itself is click-through) */
   #hotbar { pointer-events: auto; }
+  #btnSprint { left: 158px; bottom: 32px; width: 58px; height: 58px; font-size: 8px; }
+  #btnSprint.on { background: rgba(127,140,255,.55); border-color: #aab6ff; }
+
+  /* ---------- HUD extras: minimap, player count, streak, match banner ---------- */
+  #minimap { position: absolute; top: 12px; left: 12px; width: 116px; height: 116px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); background: rgba(0,0,0,.35); }
+  #playerCount { position: absolute; top: 132px; left: 40px; font-size: 11px; color: #9fe0a0; text-shadow: 1px 1px 0 #000; }
+  #announce {
+    position: absolute; left: 50%; top: 22%; transform: translateX(-50%);
+    font-size: 26px; color: #ffdd55; text-shadow: 3px 3px 0 #000; opacity: 0; pointer-events: none; white-space: nowrap;
+  }
+  @keyframes annce { 0% { opacity: 0; transform: translateX(-50%) scale(.6);} 15% { opacity: 1; transform: translateX(-50%) scale(1.1);} 80% { opacity: 1;} 100% { opacity: 0; transform: translateX(-50%) scale(1);} }
+  #matchOver {
+    position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.72); z-index: 70;
+  }
+  #matchOver .t { font-size: 40px; text-shadow: 4px 4px 0 #000; }
+  #matchOver .s { font-size: 13px; color: #eee; margin-top: 18px; text-shadow: 2px 2px 0 #000; }
+
+  /* menu: invite + sensitivity */
+  #inviteBtn { width: 360px; padding: 11px 0; font-size: 10px; margin-bottom: 16px; }
+  #sensRow { width: 360px; display: flex; align-items: center; gap: 10px; color: #ccc; font-size: 9px; margin-bottom: 18px; text-shadow: 1px 1px 0 #000; }
+  #sensRow input[type=range] { flex: 1; }
+  #sensVal { width: 42px; text-align: right; color: #ffff88; }
+
+  /* rotate-to-landscape hint (mobile portrait only) */
+  #rotateHint { position: fixed; inset: 0; z-index: 200; display: none; align-items: center; justify-content: center; background: #000; color: #fff; font-size: 12px; text-align: center; line-height: 2; padding: 30px; }
+  @media (max-width: 900px) and (orientation: portrait) { #rotateHint.armed { display: flex; } }
 </style>
 <script>(function(){try{var t=false;try{t=window.self===window.top}catch(e){t=false}if(t){var u=new URL(location.href);if(u.searchParams.has('__raw')){u.searchParams.delete('__raw');location.replace(u.pathname+u.search+u.hash)}}}catch(e){}})()</script></head>
 <body>
@@ -219,6 +246,8 @@
     <div class="sub">3D SHOOTER · RED VS BLUE</div>
     <input id="nameInput" class="mc-input" maxlength="16" placeholder="Enter your nickname" autocomplete="off">
     <button id="playBtn" class="mc-btn">PLAY</button>
+    <button id="inviteBtn" class="mc-btn">INVITE FRIENDS</button>
+    <div id="sensRow"><span>LOOK SENS</span><input id="sensRange" type="range" min="0.4" max="2" step="0.05"><span id="sensVal">1.00x</span></div>
     <div class="err" id="menuErr"></div>
     <div class="hint">
       WASD — move · LMB — fire · RMB — aim<br>
@@ -242,6 +271,13 @@
       <span class="red" id="scoreRed">0</span>
       <span class="vs">RED vs BLUE</span>
       <span class="blue" id="scoreBlue">0</span>
+    </div>
+    <canvas id="minimap" width="116" height="116"></canvas>
+    <div id="playerCount">◉ 0</div>
+    <div id="announce"></div>
+    <div id="matchOver">
+      <div class="t" id="matchOverTitle">RED TEAM WINS</div>
+      <div class="s" id="matchOverSub"></div>
     </div>
     <div id="killfeed"></div>
     <div id="hearts"></div>
@@ -275,8 +311,11 @@
       <div class="mbtn" id="btnJump">JUMP</div>
       <div class="mbtn" id="btnReload">RELOAD</div>
       <div class="mbtn" id="btnVoice">MIC</div>
+      <div class="mbtn" id="btnSprint">RUN</div>
     </div>
   </div>
+
+  <div id="rotateHint">📱↻<br>Rotate your phone to landscape<br>for the best Blockfield experience</div>
 
   <style>
   #dbg {
