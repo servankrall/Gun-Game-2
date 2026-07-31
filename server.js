@@ -178,8 +178,10 @@ export class GameServer extends DurableObject {
   humanTeamCount(r, team) { return [...r.clients.values()].filter(c => c.player.team === team).length; }
 
   pickTeam(r) {
-    const red = this.teamCount(r, 'red'), blue = this.teamCount(r, 'blue');
-    return red <= blue ? 'red' : 'blue';
+    // balance by HUMANS (bots fill around them, so a 2nd human takes the other side)
+    const red = this.humanTeamCount(r, 'red'), blue = this.humanTeamCount(r, 'blue');
+    if (red !== blue) return red < blue ? 'red' : 'blue';
+    return this.teamCount(r, 'red') <= this.teamCount(r, 'blue') ? 'red' : 'blue';
   }
 
   handleJoin(ws, m, roomId) {
