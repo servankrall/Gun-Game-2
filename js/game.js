@@ -55,6 +55,10 @@ let inGame = false;
 let tabHeld = false;
 let chatOpen = false;
 
+// Mobile / touch input
+let mobile = false, mobileSprint = false;
+const mobileMove = { x: 0, z: 0, active: false };
+
 const tracers = [], particles = [], flashes = [], rockets = [];
 
 // ============================================================
@@ -636,13 +640,14 @@ function collideAxis(pos, axis) {
 }
 
 function movePlayer(dt) {
-  const sprint = keys['ShiftLeft'] || keys['ShiftRight'];
+  const sprint = keys['ShiftLeft'] || keys['ShiftRight'] || mobileSprint;
   const speed = sprint ? SPRINT : WALK;
   let fx = 0, fz = 0;
   if (keys['KeyW']) fz -= 1;
   if (keys['KeyS']) fz += 1;
   if (keys['KeyA']) fx -= 1;
   if (keys['KeyD']) fx += 1;
+  if (mobileMove.active) { fx = mobileMove.x; fz = mobileMove.z; } // virtual joystick (mobile)
   const len = Math.hypot(fx, fz);
   let wishX = 0, wishZ = 0;
   if (len > 0) {
@@ -1331,6 +1336,93 @@ function setupInput() {
 }
 
 // ============================================================
+// Touch controls (phones / tablets): virtual joystick + drag-look + buttons
+// ============================================================
+const TOUCH_SENS = 0.006;
+function setupTouch() {
+  const coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+  if (!coarse && !('ontouchstart' in window && innerWidth < 1024)) return;
+  mobile = true;
+  $('touch').style.display = 'block';
+
+  const joyWrap = $('joyWrap'), knob = $('joyKnob');
+  const R = 52;
+  let joyId = null, jcx = 0, jcy = 0;
+  let lookId = null, lx = 0, ly = 0;
+
+  const onControl = t => t.target.closest && t.target.closest('.mbtn, #joyWrap, #hotbar, #chat');
+
+  function moveJoy(dx, dy) {
+    const d = Math.hypot(dx, dy) || 1;
+    const cl = Math.min(1, R / d);
+    knob.style.transform = `translate(${dx * cl}px, ${dy * cl}px)`;
+    const nx = Math.max(-1, Math.min(1, dx / R));
+    const nz = Math.max(-1, Math.min(1, dy / R)); // up = forward = negative
+    const mag = Math.min(1, Math.hypot(nx, nz));
+    mobileMove.active = mag > 0.12;
+    mobileMove.x = nx; mobileMove.z = nz;
+    mobileSprint = mag > 0.9;
+  }
+  function resetJoy() {
+    knob.style.transform = 'translate(0,0)';
+    mobileMove.active = false; mobileMove.x = 0; mobileMove.z = 0; mobileSprint = false;
+  }
+
+  addEventListener('touchstart', e => {
+    for (const t of e.changedTouches) {
+      if (t.target.closest && t.target.closest('#joyWrap')) {
+        joyId = t.identifier;
+        const r = joyWrap.getBoundingClientRect();
+        jcx = r.left + r.width / 2; jcy = r.top + r.height / 2;
+        moveJoy(t.clientX - jcx, t.clientY - jcy);
+      } else if (!onControl(t) && lookId === null && inGame && !chatOpen) {
+        lookId = t.identifier; lx = t.clientX; ly = t.clientY;
+      }
+    }
+  }, { passive: false });
+
+  addEventListener('touchmove', e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joyId) { moveJoy(t.clientX - jcx, t.clientY - jcy); e.preventDefault(); }
+      else if (t.identifier === lookId && !me.dead) {
+        me.ry -= (t.clientX - lx) * TOUCH_SENS;
+        me.rx -= (t.clientY - ly) * TOUCH_SENS * (me.zoomed ? 0.5 : 1);
+        me.rx = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, me.rx));
+        lx = t.clientX; ly = t.clientY; e.preventDefault();
+      }
+    }
+  }, { passive: false });
+
+  const end = e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joyId) { joyId = null; resetJoy(); }
+      if (t.identifier === lookId) lookId = null;
+    }
+  };
+  addEventListener('touchend', end);
+  addEventListener('touchcancel', end);
+
+  const press = (id, on, off) => {
+    const el = $(id);
+    el.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); on(); }, { passive: false });
+    if (off) el.addEventListener('touchend', e => { e.preventDefault(); e.stopPropagation(); off(); });
+  };
+  press('btnFire', () => { mouseDown = true; if (!me.dead) tryShoot(performance.now()); }, () => { mouseDown = false; });
+  press('btnJump', () => { keys['Space'] = true; }, () => { keys['Space'] = false; });
+  press('btnReload', () => startReload());
+  press('btnAim', () => { me.zoomed = !me.zoomed; });
+
+  // tap the hotbar to switch weapons
+  $('hotbar').addEventListener('touchstart', e => {
+    const slot = e.target.closest('.slot');
+    if (!slot) return;
+    const i = [...$('hotbar').children].indexOf(slot);
+    if (i >= 0) selectSlot(i);
+    e.preventDefault();
+  }, { passive: false });
+}
+
+// ============================================================
 // Scene / game start
 // ============================================================
 function initScene() {
@@ -1387,7 +1479,8 @@ function startGame() {
   buildViewModels();
   updateHearts(); updateHotbar(); updateAmmoHud();
   SND.spawn();
-  renderer.domElement.requestPointerLock();
+  if (mobile) setTimeout(() => { $('teamBanner').style.display = 'none'; }, 1600);
+  else renderer.domElement.requestPointerLock();
 }
 
 // ============================================================
@@ -1402,7 +1495,7 @@ function loop() {
 
   if (inGame) {
     let moving = 0;
-    if (!me.dead && locked) {
+    if (!me.dead && (locked || mobile)) {
       moving = movePlayer(dt);
       lastAnim = moving;
       const w = currentWeapon();
@@ -1453,6 +1546,7 @@ function loop() {
 setupMenu();
 initScene();
 setupInput();
+setupTouch();
 clock = new THREE.Clock();
 loop();
 

@@ -182,6 +182,28 @@
   #voiceInd .dot { width: 10px; height: 10px; background: #44dd44; animation: micPulse .7s infinite alternate; }
   @keyframes micPulse { from { opacity: .4; } to { opacity: 1; } }
   #voiceInd span { font-size: 9px; color: #aaffaa; text-shadow: 1px 1px 0 #030; }
+
+  /* ---------- mobile touch controls ---------- */
+  #touch { position: fixed; inset: 0; z-index: 60; display: none; pointer-events: none; }
+  #touch #joyWrap, #touch .mbtn { pointer-events: auto; touch-action: none; -webkit-user-select: none; user-select: none; }
+  #joyWrap {
+    position: absolute; left: 20px; bottom: 24px; width: 132px; height: 132px; border-radius: 50%;
+    background: rgba(0,0,0,.26); border: 2px solid rgba(255,255,255,.22);
+  }
+  #joyKnob {
+    position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px;
+    border-radius: 50%; background: rgba(255,255,255,.5); border: 2px solid rgba(255,255,255,.7);
+  }
+  #touch .mbtn {
+    position: absolute; border-radius: 50%; background: rgba(0,0,0,.32);
+    border: 2px solid rgba(255,255,255,.4); color: #fff; font-size: 10px; letter-spacing: 1px;
+    display: flex; align-items: center; justify-content: center; text-shadow: 1px 1px 0 #000;
+  }
+  #touch .mbtn:active { background: rgba(127,140,255,.55); }
+  #btnFire   { right: 22px;  bottom: 104px; width: 98px; height: 98px; font-size: 13px; }
+  #btnJump   { right: 132px; bottom: 42px;  width: 68px; height: 68px; }
+  #btnAim    { right: 128px; bottom: 140px; width: 60px; height: 60px; }
+  #btnReload { right: 34px;  bottom: 214px; width: 60px; height: 60px; font-size: 8px; }
 </style>
 <script>(function(){try{var t=false;try{t=window.self===window.top}catch(e){t=false}if(t){var u=new URL(location.href);if(u.searchParams.has('__raw')){u.searchParams.delete('__raw');location.replace(u.pathname+u.search+u.hash)}}}catch(e){}})()</script></head>
 <body>
@@ -242,6 +264,13 @@
       <input id="chatInput" maxlength="120" placeholder="Message... (Enter — send, Esc — close)" autocomplete="off">
     </div>
     <div id="voiceInd"><div class="dot"></div><span>MICROPHONE ON</span></div>
+    <div id="touch">
+      <div id="joyWrap"><div id="joyKnob"></div></div>
+      <div class="mbtn" id="btnFire">FIRE</div>
+      <div class="mbtn" id="btnAim">AIM</div>
+      <div class="mbtn" id="btnJump">JUMP</div>
+      <div class="mbtn" id="btnReload">RELOAD</div>
+    </div>
   </div>
 
   <style>
