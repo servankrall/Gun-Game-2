@@ -307,7 +307,9 @@ export class GameServer extends DurableObject {
   // ============================================================
   balanceBots(r) {
     if (!CFG.bots) return;
-    if (r.clients.size === 0) { for (const b of [...r.bots.keys()]) this.removeBot(r, b); return; }
+    // Bots exist only to keep solo play fun. Once a second real player joins,
+    // remove every bot so it's a pure human match.
+    if (r.clients.size !== 1) { for (const b of [...r.bots.keys()]) this.removeBot(r, b); return; }
     for (const team of ['red', 'blue']) {
       let need = CFG.botTeamTarget - this.teamCount(r, team);
       while (need > 0 && r.bots.size < CFG.botCap) { this.addBot(r, team); need--; }
@@ -321,7 +323,12 @@ export class GameServer extends DurableObject {
   }
   addBot(r, team) {
     const id = this.nextId++;
-    const nm = CFG.botNames[Math.floor(Math.random() * CFG.botNames.length)];
+    // Pick a name nobody in the room is already using (no more "3 Efes").
+    const used = new Set(this.entities(r).map(e => e.name));
+    const free = CFG.botNames.filter(n => !used.has(n));
+    let nm;
+    if (free.length) nm = free[Math.floor(Math.random() * free.length)];
+    else { let i = 2; do { nm = CFG.botNames[Math.floor(Math.random() * CFG.botNames.length)] + ' ' + i++; } while (used.has(nm)); }
     const pos = spawnFor(team);
     const bot = { id, name: nm, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, bot: true, nextShot: 0, wander: Math.random() * Math.PI * 2, repick: 0, respawnAt: 0 };
     r.bots.set(id, bot);
