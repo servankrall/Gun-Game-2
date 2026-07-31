@@ -1412,6 +1412,15 @@ function setupTouch() {
   press('btnReload', () => startReload());
   press('btnAim', () => { me.zoomed = !me.zoomed; });
 
+  // voice: tap to toggle mic on/off (mobile has no push-to-talk V key)
+  const bv = $('btnVoice');
+  bv.addEventListener('touchstart', e => {
+    e.preventDefault(); e.stopPropagation();
+    const on = !bv.classList.contains('on');
+    setTalking(on);
+    bv.classList.toggle('on', on);
+  }, { passive: false });
+
   // tap the hotbar to switch weapons
   $('hotbar').addEventListener('touchstart', e => {
     const slot = e.target.closest('.slot');

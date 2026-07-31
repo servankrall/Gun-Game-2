@@ -204,6 +204,10 @@
   #btnJump   { right: 132px; bottom: 42px;  width: 68px; height: 68px; }
   #btnAim    { right: 128px; bottom: 140px; width: 60px; height: 60px; }
   #btnReload { right: 34px;  bottom: 214px; width: 60px; height: 60px; font-size: 8px; }
+  #btnVoice  { right: 104px; bottom: 214px; width: 60px; height: 60px; font-size: 9px; }
+  #btnVoice.on { background: rgba(44,140,44,.6); border-color: #4d4; }
+  /* let mobile players tap the hotbar to switch weapons (the HUD itself is click-through) */
+  #hotbar { pointer-events: auto; }
 </style>
 <script>(function(){try{var t=false;try{t=window.self===window.top}catch(e){t=false}if(t){var u=new URL(location.href);if(u.searchParams.has('__raw')){u.searchParams.delete('__raw');location.replace(u.pathname+u.search+u.hash)}}}catch(e){}})()</script></head>
 <body>
@@ -270,6 +274,7 @@
       <div class="mbtn" id="btnAim">AIM</div>
       <div class="mbtn" id="btnJump">JUMP</div>
       <div class="mbtn" id="btnReload">RELOAD</div>
+      <div class="mbtn" id="btnVoice">MIC</div>
     </div>
   </div>
 
