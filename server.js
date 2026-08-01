@@ -242,7 +242,7 @@ export class GameServer extends DurableObject {
       if (['easy', 'normal', 'hard'].includes(m.diff)) r.diff = m.diff;
       if (m.mode === 'ctf') { r.mode = 'ctf'; r.flags = makeFlags(); }
       else if (m.mode === 'gg') { r.mode = 'gg'; }
-      if (['desert', 'arctic', 'volcano', 'night'].includes(m.map)) r.map = m.map;
+      if (['desert', 'arctic', 'volcano', 'night', 'metro'].includes(m.map)) r.map = m.map;
     }
 
     this.send(ws, {

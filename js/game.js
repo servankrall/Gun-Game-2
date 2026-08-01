@@ -86,8 +86,10 @@ const THEMES = {
              tints: { sand: 0x5c4a42, gravel: 0x352c28, dirt: 0x4a2a20, stone: 0x463c36, cobble: 0x3c332e } },
   night:   { name: 'NIGHT RAID', sky: 0x0b1020, fog: 0x0c1530, fogN: 40, fogF: 118, sun: 0xaebfff, sunI: 0.85, amb: 0x4a5a7a, ambI: 0.78,
              tints: { sand: 0x8a8f9c, gravel: 0x5a606c, dirt: 0x6a6250, stone: 0x6b7280, cobble: 0x5a6270 } },
+  metro:   { name: 'METRO', sky: 0x9aa3ad, fog: 0xa7b0ba, fogN: 50, fogF: 130, sun: 0xdfe4ea, sunI: 1.1, amb: 0xc7cdd6, ambI: 0.85,
+             tints: { sand: 0x9a9a9c, gravel: 0x6e6e72, dirt: 0x7a7570, stone: 0x8a8f96, cobble: 0x777c84 } },
 };
-const MAP_IDS = ['desert', 'arctic', 'volcano', 'night'];
+const MAP_IDS = ['desert', 'arctic', 'volcano', 'night', 'metro'];
 function applyTheme(id) {
   mapTheme = THEMES[id] ? id : 'desert';
   const t = THEMES[mapTheme];
@@ -121,6 +123,8 @@ const agentArtSVG = (h) => `<svg viewBox="0 0 20 24" shape-rendering="crispEdges
   <rect x="8" y="17" width="11" height="3" fill="#20262f"/><rect x="7" y="18" width="3" height="4" fill="#20262f"/>
   <rect x="9" y="15" width="6" height="2" fill="${h}"/></svg>`;
 let killStreak = 0;
+let multiKill = 0, lastKillTime = 0;   // rapid-frag (multi-kill) tracking
+let firstBloodDone = false;            // first kill of the current match
 let lookMul = parseFloat(localStorage.getItem('bf_sens') || '1') || 1;
 
 const tracers = [], particles = [], flashes = [], rockets = [], grenades = [];
@@ -416,6 +420,12 @@ function handleMsg(m) {
       const kName = killer ? killer.name : myName;
       const kTeam = killer ? killer.team : myTeam;
       feed(`${kName} ${m.head ? '[headshot] ' : ''}► ${vName}`, kTeam, vTeam);
+      // First blood: the first genuine kill of the match gets a shout-out.
+      if (!firstBloodDone && m.killer !== m.victim) {
+        firstBloodDone = true;
+        if (m.killer === myId) { announce('FIRST BLOOD!', '#ff3b3b'); SND.kill(); }
+        else feed(`FIRST BLOOD — ${kName}`, kTeam);
+      }
       if (victim) {
         victim.alive = false; victim.deaths++;
         deathBurst(victim.group.position);
@@ -424,7 +434,7 @@ function handleMsg(m) {
       if (killer) killer.kills++;
       if (m.victim === myId) {
         me.hp = 0; me.dead = true; me.deaths++;
-        killStreak = 0;
+        killStreak = 0; multiKill = 0;
         updateHearts();
         SND.death();
         showDeathScreen(kName);
@@ -505,7 +515,7 @@ function handleMsg(m) {
       Object.assign(scores, m.scores);
       $('scoreRed').textContent = scores.red;
       $('scoreBlue').textContent = scores.blue;
-      killStreak = 0;
+      killStreak = 0; multiKill = 0; firstBloodDone = false;
       hideMatchOver();
       resetWorld();
       if (gameMode === 'gg') { myLevel = 0; applyGunGameWeapon(); }
@@ -546,11 +556,20 @@ function announce(text, color) {
   el.textContent = text; el.style.color = color || '#ffdd55';
   el.style.animation = 'none'; void el.offsetWidth; el.style.animation = 'annce 1.3s ease-out';
 }
-const STREAK_NAMES = { 2: 'DOUBLE KILL', 3: 'TRIPLE KILL', 4: 'RAMPAGE', 5: 'UNSTOPPABLE', 7: 'GODLIKE' };
+// Rapid frags (kills within MULTI_WINDOW of each other) escalate the announce.
+const MULTI_NAMES = { 2: 'DOUBLE KILL', 3: 'TRIPLE KILL', 4: 'MEGA KILL', 5: 'MONSTER KILL' };
+// Sustained kills without dying (a spree) get their own milestones.
+const SPREE_NAMES = { 5: 'KILLING SPREE', 10: 'RAMPAGE', 15: 'UNSTOPPABLE', 20: 'GODLIKE' };
+const MULTI_WINDOW = 4000;
 function onMyKill() {
+  const now = performance.now();
   killStreak++;
-  const nm = STREAK_NAMES[killStreak] || (killStreak > 7 ? 'GODLIKE' : null);
-  if (nm) announce(nm, '#ff7733');
+  multiKill = (now - lastKillTime < MULTI_WINDOW) ? multiKill + 1 : 1;
+  lastKillTime = now;
+  let msg = null, col = '#ff7733';
+  if (multiKill >= 2) { msg = MULTI_NAMES[Math.min(multiKill, 5)]; col = '#ff5533'; }
+  if (SPREE_NAMES[killStreak]) { msg = SPREE_NAMES[killStreak]; col = '#ffd24a'; } // spree milestone wins
+  if (msg) announce(msg, col);
 }
 
 // ============================================================
