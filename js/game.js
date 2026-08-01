@@ -66,6 +66,29 @@ const mobileMove = { x: 0, z: 0, active: false };
 let myRoom = (new URLSearchParams(location.search).get('room') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
 let scoreLimit = 150;
 let botDiff = 'normal';
+
+// Selectable agents. Client perks: speed/jump (movement), starting nades/blocks,
+// accent colour (helmet/shoulders). Damage-taken and regen perks live on the
+// server (see AGENTS there); everyone still has 100 HP so the health bar is
+// unchanged — HEAVY just takes less damage.
+const AGENTS = {
+  soldier: { name: 'SOLDIER', role: 'Balanced all-rounder',        accent: 0x9aa4b2, speed: 1.0,  jump: 1.0,  nades: 3, blocks: 64 },
+  scout:   { name: 'SCOUT',   role: 'Fast & fragile · +1 grenade', accent: 0x49c26a, speed: 1.2,  jump: 1.15, nades: 4, blocks: 64 },
+  heavy:   { name: 'HEAVY',   role: 'Tank · takes less damage',    accent: 0xe08a2a, speed: 0.85, jump: 0.92, nades: 3, blocks: 80 },
+  medic:   { name: 'MEDIC',   role: 'Regenerates much faster',     accent: 0xf2f2f2, speed: 1.0,  jump: 1.0,  nades: 3, blocks: 64 },
+  ninja:   { name: 'NINJA',   role: 'Agile · very high jump',      accent: 0x9b5cff, speed: 1.15, jump: 1.4,  nades: 3, blocks: 64 },
+};
+const AGENT_IDS = Object.keys(AGENTS);
+let myAgent = AGENTS[localStorage.getItem('blockade_agent')] ? localStorage.getItem('blockade_agent') : 'soldier';
+const hex6 = n => '#' + n.toString(16).padStart(6, '0');
+const agentArtSVG = (h) => `<svg viewBox="0 0 20 24" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
+  <rect x="2" y="14" width="16" height="10" fill="#4b566d"/><rect x="2" y="14" width="16" height="2" fill="#5c6a86"/>
+  <rect x="1" y="14" width="4" height="6" fill="${h}"/><rect x="15" y="14" width="4" height="6" fill="${h}"/>
+  <rect x="8" y="12" width="4" height="3" fill="#d8a37a"/><rect x="6" y="4" width="8" height="9" fill="#d8a37a"/>
+  <rect x="5" y="2" width="10" height="4" fill="${h}"/><rect x="6" y="6" width="8" height="2" fill="#1b2230"/>
+  <rect x="7" y="9" width="2" height="2" fill="#1b2230"/><rect x="11" y="9" width="2" height="2" fill="#1b2230"/>
+  <rect x="8" y="17" width="11" height="3" fill="#20262f"/><rect x="7" y="18" width="3" height="4" fill="#20262f"/>
+  <rect x="9" y="15" width="6" height="2" fill="${h}"/></svg>`;
 let killStreak = 0;
 let lookMul = parseFloat(localStorage.getItem('bf_sens') || '1') || 1;
 
@@ -142,12 +165,42 @@ function dirtBackground() {
 const $ = id => document.getElementById(id);
 
 function setupMenu() {
-  dirtBackground();
   const input = $('nameInput'), btn = $('playBtn'), err = $('menuErr');
   input.value = localStorage.getItem('blockade_name') || '';
   input.focus();
   const diffSel = $('diffSel');
   if (diffSel) diffSel.value = localStorage.getItem('blockade_diff') || 'normal';
+
+  // ---- agent (character) selection ----
+  const chips = $('agentchips');
+  function renderAgent() {
+    const a = AGENTS[myAgent];
+    $('agentArt').innerHTML = agentArtSVG(hex6(a.accent));
+    $('agentName').textContent = a.name;
+    $('agentRole').textContent = a.role;
+    const cf = document.querySelector('.cardframe');
+    if (cf) cf.style.borderColor = hex6(a.accent);
+    for (const c of chips.children) c.classList.toggle('sel', c.dataset.id === myAgent);
+  }
+  function pickAgent(id) { if (!AGENTS[id]) return; myAgent = id; localStorage.setItem('blockade_agent', id); renderAgent(); }
+  function cycle(dir) { const i = AGENT_IDS.indexOf(myAgent); pickAgent(AGENT_IDS[(i + dir + AGENT_IDS.length) % AGENT_IDS.length]); }
+  if (chips) {
+    chips.innerHTML = '';
+    for (const id of AGENT_IDS) {
+      const c = document.createElement('div');
+      c.className = 'chip'; c.dataset.id = id;
+      c.innerHTML = `<i style="background:${hex6(AGENTS[id].accent)}"></i>${AGENTS[id].name}`;
+      c.addEventListener('click', () => pickAgent(id));
+      chips.appendChild(c);
+    }
+  }
+  $('agentPrev') && $('agentPrev').addEventListener('click', () => cycle(-1));
+  $('agentNext') && $('agentNext').addEventListener('click', () => cycle(1));
+  renderAgent();
+
+  // options panel toggle
+  const optBtn = $('optBtn');
+  if (optBtn) optBtn.addEventListener('click', () => $('optPanel').classList.toggle('open'));
   const start = () => {
     const name = input.value.trim();
     if (name.length < 2) { err.textContent = 'Nickname must be at least 2 characters!'; return; }
@@ -196,7 +249,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -326,7 +379,7 @@ function handleMsg(m) {
         me.vel.set(0, 0, 0);
         me.hp = 100; me.dead = false;
         me.ammo = { rifle: 30, shotgun: 6, sniper: 5, bazooka: 1 };
-        me.blocks = 64; me.nades = MAX_NADES; me.reloading = false;
+        me.blocks = AGENTS[myAgent]?.blocks || 64; me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.reloading = false;
         me.ry = myTeam === 'red' ? -Math.PI / 2 : Math.PI / 2; me.rx = 0;
         updateHearts(); updateAmmoHud(); updateHotbar();
         $('deathScreen').style.display = 'none';
@@ -662,8 +715,9 @@ function makeNameSprite(name, team) {
   return sp;
 }
 
-function makeCharacter(team, name) {
+function makeCharacter(team, name, agentId) {
   const group = new THREE.Group();
+  const accentCol = AGENTS[agentId]?.accent ?? 0x9aa4b2;
   const skin = new THREE.MeshLambertMaterial({ color: 0xd8a37a });
   const jersey = new THREE.MeshLambertMaterial({ color: team === 'red' ? 0xb03430 : 0x3a4fb4 });
   const pants = new THREE.MeshLambertMaterial({ color: 0x33343c });
@@ -693,7 +747,11 @@ function makeCharacter(team, name) {
   legL.geometry.translate(0, -0.35, 0); legR.geometry.translate(0, -0.35, 0);
   legL.position.set(-0.13, 0.7, 0); legR.position.set(0.13, 0.7, 0);
 
-  [head, body, armL, armR, legL, legR, gun].forEach(o => { o.castShadow = true; group.add(o); });
+  // agent accent: helmet on top of the head
+  const helmet = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.18, 0.56), new THREE.MeshLambertMaterial({ color: accentCol }));
+  helmet.position.y = 1.92;
+
+  [head, body, armL, armR, legL, legR, gun, helmet].forEach(o => { o.castShadow = true; group.add(o); });
   group.add(makeNameSprite(name, team));
   group.userData = { head, armL, armR, legL, legR, gun };
   return group;
@@ -701,7 +759,7 @@ function makeCharacter(team, name) {
 
 function addRemote(p) {
   if (remotes.has(p.id)) return;
-  const group = makeCharacter(p.team, p.name);
+  const group = makeCharacter(p.team, p.name, p.agent);
   group.position.set(p.pos.x, p.pos.y, p.pos.z);
   group.rotation.y = p.ry + Math.PI;
   group.visible = p.alive;
@@ -756,7 +814,7 @@ function collideAxis(pos, axis) {
 
 function movePlayer(dt) {
   const sprint = keys['ShiftLeft'] || keys['ShiftRight'] || mobileSprint || sprintHeld;
-  const speed = sprint ? SPRINT : WALK;
+  const speed = (sprint ? SPRINT : WALK) * (AGENTS[myAgent]?.speed || 1);
   let fx = 0, fz = 0;
   if (keys['KeyW']) fz -= 1;
   if (keys['KeyS']) fz += 1;
@@ -776,7 +834,7 @@ function movePlayer(dt) {
   me.vel.z += (wishZ - me.vel.z) * Math.min(1, accel * dt);
   me.vel.y -= GRAVITY * dt;
 
-  if (keys['Space'] && me.onGround) { me.vel.y = JUMP_V; me.onGround = false; }
+  if (keys['Space'] && me.onGround) { me.vel.y = JUMP_V * (AGENTS[myAgent]?.jump || 1); me.onGround = false; }
 
   // axis-by-axis integration
   const p = me.pos;
@@ -1671,6 +1729,8 @@ function initScene() {
 
 function startGame() {
   inGame = true;
+  me.blocks = AGENTS[myAgent]?.blocks || 64;
+  me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES;
   $('menu').style.display = 'none';
   $('hud').style.display = 'block';
   $('scoreRed').textContent = scores.red;

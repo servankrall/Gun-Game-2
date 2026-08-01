@@ -132,6 +132,16 @@ const SKILL = {
   normal: { min: 0.72, span: 0.56 },
   hard:   { min: 1.05, span: 0.60 },
 };
+// Agent perks the server enforces (damage taken + regen rate). Everyone keeps
+// 100 HP; HEAVY just absorbs more. Client handles speed/jump/loadout perks.
+const AGENTS = {
+  soldier: { dmgTaken: 1.0,  regen: 1.0 },
+  scout:   { dmgTaken: 1.15, regen: 1.0 },
+  heavy:   { dmgTaken: 0.7,  regen: 1.0 },
+  medic:   { dmgTaken: 1.0,  regen: 2.2 },
+  ninja:   { dmgTaken: 1.1,  regen: 1.0 },
+};
+const agentOf = id => AGENTS[id] ? id : 'soldier';
 
 function spawnFor(team) {
   const z = Math.random() * 16 - 8;
@@ -189,7 +199,7 @@ export class GameServer extends DurableObject {
 
   // ---- combatant helpers ----
   entities(r) { return [...r.clients.values()].map(c => c.player).concat([...r.bots.values()]); }
-  pub(p) { return { id: p.id, name: p.name, team: p.team, pos: p.pos, ry: p.ry, rx: p.rx, anim: p.anim, alive: p.alive, hp: p.hp, kills: p.kills, deaths: p.deaths, bot: !!p.bot }; }
+  pub(p) { return { id: p.id, name: p.name, team: p.team, pos: p.pos, ry: p.ry, rx: p.rx, anim: p.anim, alive: p.alive, hp: p.hp, kills: p.kills, deaths: p.deaths, bot: !!p.bot, agent: p.agent || 'soldier' }; }
   count(r) { return r.clients.size + r.bots.size; }
   teamCount(r, team) { return this.entities(r).filter(e => e.team === team).length; }
   humanTeamCount(r, team) { return [...r.clients.values()].filter(c => c.player.team === team).length; }
@@ -207,7 +217,9 @@ export class GameServer extends DurableObject {
     const team = this.pickTeam(r);
     const name = String(m.name || 'Player').slice(0, 16) || 'Player';
     const pos = spawnFor(team);
-    const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, lastHit: 0 };
+    const agent = agentOf(m.agent);
+    const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, lastHit: 0,
+      agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.clients.set(id, { ws, player });
     // First player in a room sets the bot difficulty for it.
     if (r.clients.size === 1 && ['easy', 'normal', 'hard'].includes(m.diff)) r.diff = m.diff;
@@ -284,6 +296,7 @@ export class GameServer extends DurableObject {
 
   applyDamage(r, tgt, dmg, attacker, head) {
     if (r.over) return;
+    dmg = Math.max(1, Math.round(dmg * (tgt.dmgTakenMult || 1))); // agent damage-taken perk
     tgt.hp -= dmg;
     tgt.lastHit = Date.now(); // resets the regen delay
     if (tgt.hp > 0) {
@@ -365,7 +378,8 @@ export class GameServer extends DurableObject {
     else { let i = 2; do { nm = CFG.botNames[Math.floor(Math.random() * CFG.botNames.length)] + ' ' + i++; } while (used.has(nm)); }
     const pos = spawnFor(team);
     const skill = SKILL[r.diff] || SKILL.normal;
-    const bot = { id, name: nm, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, bot: true, nextShot: 0, wander: Math.random() * Math.PI * 2, repick: 0, respawnAt: 0, skill: skill.min + Math.random() * skill.span, lastHit: 0 };
+    const agent = Object.keys(AGENTS)[Math.floor(Math.random() * Object.keys(AGENTS).length)];
+    const bot = { id, name: nm, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, bot: true, nextShot: 0, wander: Math.random() * Math.PI * 2, repick: 0, respawnAt: 0, skill: skill.min + Math.random() * skill.span, lastHit: 0, agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.bots.set(id, bot);
     this.broadcast(r, { t: 'join', p: this.pub(bot) });
   }
@@ -454,7 +468,7 @@ export class GameServer extends DurableObject {
         if (!r.over) for (const e of this.entities(r)) {
           if (!e.alive || e.hp >= 100 || now - (e.lastHit || 0) < CFG.regenDelay) continue;
           const was = Math.round(e.hp);
-          e.hp = Math.min(100, e.hp + CFG.regenRate * dt);
+          e.hp = Math.min(100, e.hp + CFG.regenRate * (e.regenMult || 1) * dt);
           const nowHp = Math.round(e.hp);
           if (!e.bot && nowHp !== was) { const c = r.clients.get(e.id); if (c) this.send(c.ws, { t: 'heal', hp: nowHp }); }
         }

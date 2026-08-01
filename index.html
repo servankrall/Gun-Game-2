@@ -16,42 +16,86 @@
   /* ---------- Main menu ---------- */
   #menu {
     position: fixed; inset: 0; z-index: 100;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    background-repeat: repeat; background-size: 64px 64px;
-    image-rendering: pixelated;
+    display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start;
+    background: linear-gradient(160deg, #12203a 0%, #0d1830 55%, #0a1226 100%);
+    image-rendering: pixelated; overflow: hidden;
   }
-  #menu .logo {
-    font-size: 52px; color: #fff; letter-spacing: 4px;
-    text-shadow: 5px 5px 0 #3f3f3f;
-    margin-bottom: 8px;
-  }
-  #menu .splash {
-    color: #ffff55; font-size: 11px; transform: rotate(-12deg) translateX(150px) translateY(-26px);
-    text-shadow: 2px 2px 0 #3f3f00;
-    animation: pulse 0.5s infinite alternate;
-  }
-  @keyframes pulse { from { transform: rotate(-12deg) translateX(150px) translateY(-26px) scale(1);} to { transform: rotate(-12deg) translateX(150px) translateY(-26px) scale(1.08);} }
-  #menu .sub { color: #ccc; font-size: 10px; margin-bottom: 40px; text-shadow: 2px 2px 0 #222; }
+  /* ---- top bar ---- */
+  #topbar { display: flex; align-items: center; gap: 20px; padding: 16px 26px 10px; }
+  #menu .logo { font-size: 26px; letter-spacing: 2px; text-shadow: 3px 3px 0 #000, 0 0 0 #000; }
+  #menu .logo .lb1 { color: #ff5a5a; text-shadow: 3px 3px 0 #5c1010, 6px 6px 0 #000; }
+  #menu .logo .lb2 { color: #6f9bff; text-shadow: 3px 3px 0 #16306c, 6px 6px 0 #000; }
+  #navtabs { display: flex; gap: 18px; margin-left: 18px; }
+  #navtabs .tab { color: #7f8aa5; font-size: 10px; letter-spacing: 1px; padding: 6px 4px; cursor: default; border-bottom: 3px solid transparent; }
+  #navtabs .tab.active { color: #fff; border-bottom-color: #ff5a5a; }
+  .gear { margin-left: auto; background: rgba(255,255,255,.08); color: #cfd6e6; border: 2px solid #2a3a5c; width: 38px; height: 38px; font-size: 16px; cursor: pointer; }
+  .gear:hover { background: rgba(255,255,255,.16); }
 
-  .mc-input {
-    width: 360px; padding: 14px; font-size: 13px; color: #fff; text-align: center;
-    background: #000; border: 2px solid #a0a0a0; outline: none; margin-bottom: 16px;
-  }
-  .mc-input:focus { border-color: #fff; }
-  .mc-btn {
-    width: 360px; padding: 15px 0; font-size: 13px; color: #fff; cursor: pointer;
-    background: #6f6f6f;
+  /* ---- lobby row of party slots ---- */
+  #lobby { flex: 1; display: flex; align-items: center; justify-content: center; gap: 16px; padding: 8px 20px; min-height: 0; }
+  .pslot { width: 150px; height: 340px; border: 2px solid #223350; background: rgba(255,255,255,.03);
+    display: flex; align-items: center; justify-content: center; }
+  .pslot.ghost span { color: #33456a; font-size: 34px; }
+  #agentCard { width: 250px; height: 400px; border: none; background: none; }
+  .cardframe { position: relative; width: 100%; height: 100%; padding: 10px;
+    background: linear-gradient(180deg, #b5352f 0%, #7a2420 42%, #171e2f 42%, #10192c 100%);
+    border: 3px solid #ffc23a; box-shadow: 0 0 0 3px #000, 0 10px 30px rgba(0,0,0,.5);
+    display: flex; flex-direction: column; align-items: center; }
+  #agentArt { width: 150px; height: 200px; margin-top: 6px; filter: drop-shadow(4px 6px 0 rgba(0,0,0,.4)); }
+  #agentArt svg { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+  .cardframe .ready { color: #ffe9a8; font-size: 9px; letter-spacing: 2px; margin-top: 4px; }
+  .cardframe .pname { width: 100%; margin-top: 8px; }
+  .cardframe .pname input { width: 100%; text-align: center; background: #e9c65a; color: #2a1c00; border: 2px solid #000;
+    padding: 9px 4px; font-size: 11px; letter-spacing: 1px; outline: none; }
+  .cardframe .pname input::placeholder { color: #6b571f; }
+  .cardframe .role { color: #aeb8cf; font-size: 8px; margin-top: 8px; text-align: center; min-height: 10px; }
+  .agentnav { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .anav { background: #ffc23a; color: #000; border: 2px solid #000; width: 30px; height: 30px; cursor: pointer; font-size: 11px; }
+  .anav:hover { background: #ffd873; }
+  .aname { color: #fff; font-size: 12px; min-width: 92px; text-align: center; text-shadow: 2px 2px 0 #000; }
+
+  /* ---- agent chips ---- */
+  #agentchips { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; padding: 4px 20px 2px; }
+  #agentchips .chip { display: flex; align-items: center; gap: 6px; padding: 6px 10px; cursor: pointer;
+    background: rgba(255,255,255,.05); border: 2px solid #26375a; color: #9fb0d0; font-size: 8px; letter-spacing: 1px; }
+  #agentchips .chip:hover { background: rgba(255,255,255,.12); }
+  #agentchips .chip.sel { border-color: #ffc23a; color: #fff; background: rgba(255,194,58,.14); }
+  #agentchips .chip i { width: 12px; height: 12px; display: inline-block; border: 1px solid #000; }
+
+  /* ---- bottom bar ---- */
+  #bottombar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 26px 8px; }
+  .bside { flex: 1; display: flex; align-items: center; }
+  .bside.right { justify-content: flex-end; }
+  .practice { color: #9fb0d0; font-size: 9px; display: flex; align-items: center; gap: 8px; letter-spacing: 1px; }
+  #diffSel { background: #0c1730; color: #fff; border: 2px solid #2a3a5c; padding: 8px; font-size: 9px; outline: none; }
+  .bmid { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .playbtn { min-width: 210px; padding: 16px 40px; font-size: 18px; letter-spacing: 2px; color: #fff; cursor: pointer;
+    background: #ff4655; border: none; box-shadow: 0 0 0 3px #000, 0 6px 0 #8f1f2a; text-shadow: 2px 2px 0 #7a1a24; }
+  .playbtn:hover { background: #ff5f6c; }
+  .playbtn:active { transform: translateY(3px); box-shadow: 0 0 0 3px #000, 0 3px 0 #8f1f2a; }
+  .playbtn:disabled { opacity: .55; cursor: default; }
+  #modeRow { display: flex; gap: 14px; }
+  #modeRow .mode { color: #cfd6e6; font-size: 9px; letter-spacing: 1px; padding: 4px 8px; border: 2px solid transparent; cursor: pointer; }
+  #modeRow .mode.active { border-color: #ffc23a; color: #fff; }
+  #modeRow .mode.soon { color: #5d6a86; cursor: default; }
+  .linkbtn { background: rgba(255,255,255,.06); color: #cfd6e6; border: 2px solid #2a3a5c; padding: 12px 16px; font-size: 9px; letter-spacing: 1px; cursor: pointer; }
+  .linkbtn:hover { background: rgba(255,255,255,.14); }
+
+  #menu .err { text-align: center; color: #ff8080; font-size: 10px; min-height: 12px; text-shadow: 1px 1px 0 #400; }
+  #optPanel { display: none; flex-direction: column; align-items: center; gap: 8px; padding: 6px 20px; }
+  #optPanel.open { display: flex; }
+  #optPanel .optrow { display: flex; align-items: center; gap: 10px; color: #cfd6e6; font-size: 9px; }
+  #optPanel .optrow input[type=range] { width: 240px; }
+  #optPanel .opthint { color: #8090ad; font-size: 8px; line-height: 1.9; text-align: center; }
+  #menu .ver { position: absolute; left: 8px; bottom: 6px; color: #5d6a86; font-size: 8px; }
+  #menu .credit { position: absolute; right: 8px; bottom: 6px; color: #8090ad; font-size: 8px; text-shadow: 1px 1px 0 #000; }
+  @media (max-width: 760px) { .hide-sm { display: none; } #agentCard { width: 210px; height: 350px; } .pslot { height: 300px; } }
+  /* generic pixel button (used by the pause menu) */
+  .mc-btn { padding: 13px 22px; font-size: 12px; color: #fff; cursor: pointer; background: #6f6f6f;
     border: 2px solid; border-color: #aaa #565656 #565656 #aaa;
-    box-shadow: inset 0 -4px 0 rgba(0,0,0,.3), inset 0 2px 0 rgba(255,255,255,.25), 0 0 0 2px #000;
-    text-shadow: 2px 2px 0 #3f3f3f;
-  }
+    box-shadow: inset 0 -4px 0 rgba(0,0,0,.3), inset 0 2px 0 rgba(255,255,255,.25), 0 0 0 2px #000; text-shadow: 2px 2px 0 #3f3f3f; }
   .mc-btn:hover { background: #7f8cff; border-color: #c3caff #4a55b0 #4a55b0 #c3caff; }
   .mc-btn:active { transform: translateY(2px); }
-  .mc-btn:disabled { opacity: .5; cursor: default; }
-  #menu .hint { margin-top: 36px; color: #aaa; font-size: 9px; line-height: 2; text-align: center; text-shadow: 1px 1px 0 #000; }
-  #menu .err { color: #ff5555; font-size: 10px; margin-top: 14px; min-height: 14px; text-shadow: 1px 1px 0 #400; }
-  #menu .ver { position: absolute; left: 8px; bottom: 6px; color: #888; font-size: 9px; }
-  #menu .credit { position: absolute; right: 8px; bottom: 6px; color: #aaa; font-size: 9px; text-shadow: 1px 1px 0 #000; }
 
   /* ---------- team banner ---------- */
   #teamBanner {
@@ -228,9 +272,6 @@
   #matchOver .s { font-size: 13px; color: #eee; margin-top: 18px; text-shadow: 2px 2px 0 #000; }
 
   /* menu: invite + sensitivity */
-  #inviteBtn { width: 360px; padding: 11px 0; font-size: 10px; margin-bottom: 16px; }
-  #sensRow { width: 360px; display: flex; align-items: center; gap: 10px; color: #ccc; font-size: 9px; margin-bottom: 18px; text-shadow: 1px 1px 0 #000; }
-  #sensRow input[type=range] { flex: 1; }
   #sensVal { width: 42px; text-align: right; color: #ffff88; }
 
   /* rotate-to-landscape hint (mobile portrait only) */
@@ -242,25 +283,71 @@
   <canvas id="game"></canvas>
 
   <div id="menu">
-    <div class="logo">BLOCKFIELD</div>
-    <div class="splash">Red vs Blue!</div>
-    <div class="sub">3D SHOOTER · RED VS BLUE</div>
-    <input id="nameInput" class="mc-input" maxlength="16" placeholder="Enter your nickname" autocomplete="off">
-    <select id="diffSel" class="mc-input" title="Bot difficulty">
-      <option value="easy">BOTS: EASY</option>
-      <option value="normal" selected>BOTS: NORMAL</option>
-      <option value="hard">BOTS: HARD</option>
-    </select>
-    <button id="playBtn" class="mc-btn">PLAY</button>
-    <button id="inviteBtn" class="mc-btn">INVITE FRIENDS</button>
-    <div id="sensRow"><span>LOOK SENS</span><input id="sensRange" type="range" min="0.4" max="2" step="0.05"><span id="sensVal">1.00x</span></div>
-    <div class="err" id="menuErr"></div>
-    <div class="hint">
-      WASD — move · LMB — fire · RMB — aim<br>
-      1-6 — weapons · G — grenade · SPACE — jump · SHIFT — sprint · TAB — scoreboard<br>
-      T — chat · V (hold) — voice · 5 — pickaxe · 6 — bazooka
+    <div id="topbar">
+      <div class="logo"><span class="lb1">BLOCK</span><span class="lb2">FIELD</span></div>
+      <div id="navtabs">
+        <span class="tab active">PLAY</span>
+        <span class="tab">AGENTS</span>
+        <span class="tab">CAREER</span>
+      </div>
+      <button id="optBtn" class="gear" title="Options">⚙</button>
     </div>
-    <div class="ver">Blockfield v1.0</div>
+
+    <div id="lobby">
+      <div class="pslot ghost"><span>+</span></div>
+      <div class="pslot ghost hide-sm"><span>+</span></div>
+      <div id="agentCard" class="pslot card">
+        <div class="cardframe">
+          <div id="agentArt"></div>
+          <div class="ready">READY</div>
+          <div class="pname"><input id="nameInput" maxlength="16" placeholder="PLAYER NAME" autocomplete="off"></div>
+          <div id="agentRole" class="role">Balanced all-rounder</div>
+          <div class="agentnav">
+            <button id="agentPrev" class="anav">◀</button>
+            <div id="agentName" class="aname">SOLDIER</div>
+            <button id="agentNext" class="anav">▶</button>
+          </div>
+        </div>
+      </div>
+      <div class="pslot ghost hide-sm"><span>+</span></div>
+      <div class="pslot ghost"><span>+</span></div>
+    </div>
+
+    <div id="agentchips"></div>
+
+    <div id="bottombar">
+      <div class="bside">
+        <label class="practice">PRACTICE
+          <select id="diffSel" title="Bot difficulty">
+            <option value="easy">BOTS: EASY</option>
+            <option value="normal" selected>BOTS: NORMAL</option>
+            <option value="hard">BOTS: HARD</option>
+          </select>
+        </label>
+      </div>
+      <div class="bmid">
+        <button id="playBtn" class="playbtn">PLAY</button>
+        <div id="modeRow">
+          <span class="mode active" data-mode="dm">DEATHMATCH</span>
+          <span class="mode soon" data-mode="ctf" title="Coming soon">CAPTURE THE FLAG · SOON</span>
+        </div>
+      </div>
+      <div class="bside right">
+        <button id="inviteBtn" class="linkbtn">⧉ INVITE FRIENDS</button>
+      </div>
+    </div>
+
+    <div class="err" id="menuErr"></div>
+
+    <div id="optPanel">
+      <div class="optrow"><span>LOOK SENS</span><input id="sensRange" type="range" min="0.4" max="2" step="0.05"><span id="sensVal">1.00x</span></div>
+      <div class="opthint">
+        WASD move · LMB fire · RMB aim · 1-6 weapons · G grenade<br>
+        SPACE jump · SHIFT sprint · TAB scoreboard · R reload · T chat · V voice
+      </div>
+    </div>
+
+    <div class="ver">Blockfield v2.0</div>
     <div class="credit">Servan Kangal tarafından yapıldı</div>
   </div>
 
