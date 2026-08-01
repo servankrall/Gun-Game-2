@@ -1,0 +1,15 @@
+{
+  "name": "blockfield",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Blockfield — voxel red-vs-blue multiplayer shooter (Cloudflare Workers + Durable Objects).",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "build:offline": "node scripts/build-offline.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}
