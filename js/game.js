@@ -66,6 +66,8 @@ const mobileMove = { x: 0, z: 0, active: false };
 let myRoom = (new URLSearchParams(location.search).get('room') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
 let scoreLimit = 150;
 let botDiff = 'normal';
+let gameMode = 'dm';   // 'dm' (deathmatch) | 'ctf' (capture the flag)
+let menuMode = 'dm';   // mode chosen on the menu, sent at join
 
 // Selectable agents. Client perks: speed/jump (movement), starting nades/blocks,
 // accent colour (helmet/shoulders). Damage-taken and regen perks live on the
@@ -198,6 +200,13 @@ function setupMenu() {
   $('agentNext') && $('agentNext').addEventListener('click', () => cycle(1));
   renderAgent();
 
+  // game mode selection (Deathmatch / Capture the Flag)
+  menuMode = (localStorage.getItem('blockade_mode') === 'ctf') ? 'ctf' : 'dm';
+  const modes = document.querySelectorAll('#modeRow .mode');
+  const syncModes = () => modes.forEach(el => el.classList.toggle('active', el.dataset.mode === menuMode));
+  modes.forEach(el => el.addEventListener('click', () => { menuMode = el.dataset.mode; localStorage.setItem('blockade_mode', menuMode); syncModes(); }));
+  syncModes();
+
   // options panel toggle
   const optBtn = $('optBtn');
   if (optBtn) optBtn.addEventListener('click', () => $('optPanel').classList.toggle('open'));
@@ -249,7 +258,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -284,12 +293,14 @@ function handleMsg(m) {
       me.pos.set(m.pos.x, m.pos.y, m.pos.z);
       me.ry = m.ry; me.rx = 0;
       Object.assign(scores, m.scores);
-      scoreLimit = m.scoreLimit || 150;
+      gameMode = m.mode || 'dm';
+      scoreLimit = m.limit || m.scoreLimit || 150;
       updateCount(m.count);
       for (const p of m.players) addRemote(p);
       // destroyed map blocks first, then player-built blocks (a built block may occupy a destroyed spot)
       for (const d of m.destroyed || []) removeBlockLocal(d.x, d.y, d.z, true);
       for (const b of m.placed) placeBlockLocal(b.x, b.y, b.z, b.team);
+      if (gameMode === 'ctf') { ensureFlags(); if (m.flags) updateFlagMeshes(m.flags); }
       startGame();
       initVoice();
       break;
@@ -302,8 +313,17 @@ function handleMsg(m) {
       break;
     }
     case 'pong': dbgOnPong(m); break;
+    case 'flag': {
+      const tn = m.team === 'red' ? 'Red' : 'Blue';
+      if (m.ev === 'pickup') { feed(`${m.name || 'Someone'} grabbed the ${tn} flag!`, m.team); SND.spawn(); }
+      else if (m.ev === 'capture') { feed(`${m.name || 'Someone'} captured the ${tn} flag! 🚩`, m.team); SND.kill(); announce('FLAG CAPTURED!', '#ffd24a'); }
+      else if (m.ev === 'returned') { feed(`The ${tn} flag was returned.`, m.team); }
+      else if (m.ev === 'drop') { feed(`The ${tn} flag was dropped!`, m.team); }
+      break;
+    }
     case 'states':
       dbgOnStates(m);
+      if (m.flags) updateFlagMeshes(m.flags);
       for (const s of m.states) {
         if (s.id === myId) continue;
         const r = remotes.get(s.id);
@@ -432,7 +452,7 @@ function handleMsg(m) {
       killStreak = 0;
       hideMatchOver();
       resetWorld();
-      feed('New match — first to ' + scoreLimit + ' wins!', myTeam);
+      feed(gameMode === 'ctf' ? `New match — capture ${scoreLimit} flags to win!` : `New match — first to ${scoreLimit} kills wins!`, myTeam);
       break;
   }
 }
@@ -676,6 +696,38 @@ function resetWorld() {
     collision.add(k);
   }
   for (const mesh of dirty) mesh.instanceMatrix.needsUpdate = true;
+}
+
+// ============================================================
+// CTF flags
+// ============================================================
+const flagMeshes = {};
+function makeFlagMesh(team) {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.BoxGeometry(0.09, 2.2, 0.09), new THREE.MeshLambertMaterial({ color: 0x6b5230 }));
+  pole.position.y = 1.1;
+  const cloth = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.6, 0.06), new THREE.MeshLambertMaterial({ color: team === 'red' ? 0xd83a34 : 0x3a5bd8 }));
+  cloth.position.set(0.52, 1.85, 0);
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.18, 0.6), new THREE.MeshLambertMaterial({ color: 0x2b2b2b }));
+  base.position.y = 0.09;
+  [pole, cloth, base].forEach(o => { o.castShadow = true; g.add(o); });
+  g.userData.cloth = cloth;
+  scene.add(g);
+  return g;
+}
+function ensureFlags() {
+  if (!flagMeshes.red) { flagMeshes.red = makeFlagMesh('red'); flagMeshes.blue = makeFlagMesh('blue'); }
+}
+function updateFlagMeshes(flags) {
+  ensureFlags();
+  const wobble = Math.sin(performance.now() * 0.004) * 0.35;
+  for (const t of ['red', 'blue']) {
+    const f = flags[t], g = flagMeshes[t];
+    if (!f || !g) continue;
+    g.position.set(f.x, f.y - 0.5, f.z); // server y is base + 0.5; sit the group on the ground
+    g.userData.cloth.rotation.y = wobble;
+    g.visible = true;
+  }
 }
 
 // ============================================================

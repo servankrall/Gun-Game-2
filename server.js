@@ -124,6 +124,8 @@ const CFG = {
   botNames: ['Ozan', 'Deniz', 'Kaya', 'Ares', 'Bora', 'Cem', 'Efe', 'Mert', 'Rux', 'Zane', 'Nova', 'Kartal'],
   regenDelay: 5000,        // ms without taking damage before health regenerates
   regenRate: 14,           // HP restored per second while regenerating
+  captureLimit: 3,         // flag captures to win a CTF match
+  flagReturn: 30000,       // ms a dropped flag waits before auto-returning home
 };
 const WEAPON = { rifle: { dmg: 16, rate: 220, range: 22 } };
 // Per-difficulty bot skill range (skill scales fire rate + accuracy).
@@ -149,6 +151,16 @@ function spawnFor(team) {
   return { x, y: groundTop(x, z) + 1.1, z };
 }
 function ryFor(team) { return team === 'red' ? -Math.PI / 2 : Math.PI / 2; }
+// CTF flag home positions (inside each base, within the no-build zone so they
+// can't be walled in). Each flag: home, current pos, carrier id, atHome, dropAt.
+function makeFlags() {
+  const z = 0, home = (x) => ({ x, y: groundTop(x, z) + 0.5, z });
+  const rh = home(-26), bh = home(26);
+  return {
+    red:  { home: rh, pos: { ...rh }, carrier: null, atHome: true, dropAt: 0 },
+    blue: { home: bh, pos: { ...bh }, carrier: null, atHome: true, dropAt: 0 },
+  };
+}
 const clampArena = v => Math.max(-HALF + 1.5, Math.min(HALF - 2.5, v));
 
 export class GameServer extends DurableObject {
@@ -163,7 +175,7 @@ export class GameServer extends DurableObject {
   room(id) {
     let r = this.rooms.get(id);
     if (!r) {
-      r = { id, clients: new Map(), bots: new Map(), scores: { red: 0, blue: 0 }, placed: new Map(), destroyed: new Map(), over: false, diff: 'normal' };
+      r = { id, clients: new Map(), bots: new Map(), scores: { red: 0, blue: 0 }, placed: new Map(), destroyed: new Map(), over: false, diff: 'normal', mode: 'dm', flags: null };
       this.rooms.set(id, r);
     }
     return r;
@@ -221,11 +233,16 @@ export class GameServer extends DurableObject {
     const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, lastHit: 0,
       agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.clients.set(id, { ws, player });
-    // First player in a room sets the bot difficulty for it.
-    if (r.clients.size === 1 && ['easy', 'normal', 'hard'].includes(m.diff)) r.diff = m.diff;
+    // First player in a room sets the bot difficulty AND the game mode for it.
+    if (r.clients.size === 1) {
+      if (['easy', 'normal', 'hard'].includes(m.diff)) r.diff = m.diff;
+      if (m.mode === 'ctf') { r.mode = 'ctf'; r.flags = makeFlags(); }
+    }
 
     this.send(ws, {
-      t: 'welcome', id, team, pos, ry: player.ry, scores: r.scores, room: roomId, count: this.count(r), scoreLimit: CFG.scoreLimit,
+      t: 'welcome', id, team, pos, ry: player.ry, scores: r.scores, room: roomId, count: this.count(r),
+      mode: r.mode, limit: r.mode === 'ctf' ? CFG.captureLimit : CFG.scoreLimit,
+      flags: r.flags ? this.flagPub(r) : undefined,
       players: this.entities(r).filter(e => e.id !== id).map(e => this.pub(e)),
       placed: [...r.placed.values()], destroyed: [...r.destroyed.values()],
     });
@@ -315,10 +332,61 @@ export class GameServer extends DurableObject {
       }
     }
     tgt.respawnAt = Date.now() + (tgt.bot ? 3000 : 3500); // auto-respawn (client never asks)
-    if (attacker) r.scores[attacker.team] = (r.scores[attacker.team] || 0) + 1;
+    if (r.mode === 'ctf' && r.flags) this.dropFlagIfCarrier(r, tgt); // drop the flag where they fell
+    // In Deathmatch kills score; in CTF only captures score.
+    if (r.mode !== 'ctf' && attacker) r.scores[attacker.team] = (r.scores[attacker.team] || 0) + 1;
     this.broadcast(r, { t: 'death', victim: tgt.id, killer: attacker ? attacker.id : tgt.id, head });
     this.broadcast(r, { t: 'scores', scores: r.scores });
-    if (attacker && r.scores[attacker.team] >= CFG.scoreLimit) this.endMatch(r, attacker.team);
+    if (r.mode !== 'ctf' && attacker && r.scores[attacker.team] >= CFG.scoreLimit) this.endMatch(r, attacker.team);
+  }
+
+  flagPub(r) {
+    const f = r.flags; const p = t => ({ x: f[t].pos.x, y: f[t].pos.y, z: f[t].pos.z, carrier: f[t].carrier, atHome: f[t].atHome });
+    return { red: p('red'), blue: p('blue') };
+  }
+  dropFlagIfCarrier(r, ent) {
+    for (const t of ['red', 'blue']) {
+      const f = r.flags[t];
+      if (f.carrier === ent.id) {
+        f.carrier = null; f.atHome = false; f.dropAt = Date.now();
+        f.pos = { x: ent.pos.x, y: groundTop(ent.pos.x, ent.pos.z) + 0.5, z: ent.pos.z };
+        this.broadcast(r, { t: 'flag', ev: 'drop', team: t });
+      }
+    }
+  }
+  // CTF flag interactions — humans only (bots just fight).
+  updateFlags(r, now) {
+    if (r.mode !== 'ctf' || !r.flags || r.over) return;
+    for (const t of ['red', 'blue']) { // auto-return a flag left on the ground
+      const f = r.flags[t];
+      if (!f.atHome && f.carrier === null && now - f.dropAt > CFG.flagReturn) {
+        f.pos = { ...f.home }; f.atHome = true;
+        this.broadcast(r, { t: 'flag', ev: 'returned', team: t });
+      }
+    }
+    const near = (a, b, d) => (a.x - b.x) ** 2 + (a.z - b.z) ** 2 < d * d;
+    for (const c of r.clients.values()) {
+      const p = c.player; if (!p.alive) continue;
+      const own = r.flags[p.team], enemyT = p.team === 'red' ? 'blue' : 'red', enemy = r.flags[enemyT];
+      if (enemy.carrier === p.id) {                 // carrying — follow + try to capture
+        enemy.pos = { x: p.pos.x, y: p.pos.y + 0.2, z: p.pos.z };
+        if (own.atHome && near(p.pos, own.home, 2.4)) {
+          r.scores[p.team] = (r.scores[p.team] || 0) + 1;
+          enemy.carrier = null; enemy.atHome = true; enemy.pos = { ...enemy.home };
+          this.broadcast(r, { t: 'flag', ev: 'capture', team: enemyT, by: p.id, name: p.name });
+          this.broadcast(r, { t: 'scores', scores: r.scores });
+          if (r.scores[p.team] >= CFG.captureLimit) { this.endMatch(r, p.team); return; }
+        }
+      } else {
+        if (enemy.carrier === null && near(p.pos, enemy.pos, 1.5)) { // grab enemy flag
+          enemy.carrier = p.id; enemy.atHome = false;
+          this.broadcast(r, { t: 'flag', ev: 'pickup', team: enemyT, by: p.id, name: p.name });
+        } else if (!own.atHome && own.carrier === null && near(p.pos, own.pos, 1.5)) { // return own flag
+          own.pos = { ...own.home }; own.atHome = true;
+          this.broadcast(r, { t: 'flag', ev: 'returned', team: p.team, by: p.id, name: p.name });
+        }
+      }
+    }
   }
 
   endMatch(r, winner) {
@@ -331,6 +399,7 @@ export class GameServer extends DurableObject {
     r.over = false;
     r.scores = { red: 0, blue: 0 };
     r.placed.clear(); r.destroyed.clear();
+    if (r.mode === 'ctf') r.flags = makeFlags();
     for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.pos = spawnFor(p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
     for (const b of r.bots.values()) { b.hp = 100; b.alive = true; b.kills = 0; b.deaths = 0; b.pos = spawnFor(b.team); b.ry = ryFor(b.team); this.broadcast(r, { t: 'respawn', id: b.id, pos: b.pos }); }
     this.broadcast(r, { t: 'scores', scores: r.scores });
@@ -340,6 +409,7 @@ export class GameServer extends DurableObject {
   handleLeave(roomId, id) {
     const r = this.rooms.get(roomId); if (!r) return;
     if (!r.clients.has(id)) return;
+    if (r.mode === 'ctf' && r.flags) this.dropFlagIfCarrier(r, r.clients.get(id).player);
     r.clients.delete(id);
     this.broadcast(r, { t: 'leave', id });
     this.balanceBots(r);
@@ -472,9 +542,10 @@ export class GameServer extends DurableObject {
           const nowHp = Math.round(e.hp);
           if (!e.bot && nowHp !== was) { const c = r.clients.get(e.id); if (c) this.send(c.ws, { t: 'heal', hp: nowHp }); }
         }
+        this.updateFlags(r, now);
         const states = [];
         for (const e of this.entities(r)) { if (!e.alive) continue; states.push({ id: e.id, pos: e.pos, ry: e.ry, rx: e.rx, anim: e.anim, hp: Math.round(e.hp) }); }
-        if (states.length) this.broadcast(r, { t: 'states', states });
+        if (states.length) this.broadcast(r, { t: 'states', states, flags: r.mode === 'ctf' && r.flags ? this.flagPub(r) : undefined });
       }
     }, CFG.tick);
   }
