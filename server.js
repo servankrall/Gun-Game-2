@@ -141,11 +141,13 @@ const SKILL = {
 // Agent perks the server enforces (damage taken + regen rate). Everyone keeps
 // 100 HP; HEAVY just absorbs more. Client handles speed/jump/loadout perks.
 const AGENTS = {
-  soldier: { dmgTaken: 1.0,  regen: 1.0 },
-  scout:   { dmgTaken: 1.15, regen: 1.0 },
-  heavy:   { dmgTaken: 0.7,  regen: 1.0 },
-  medic:   { dmgTaken: 1.0,  regen: 2.2 },
-  ninja:   { dmgTaken: 1.1,  regen: 1.0 },
+  soldier:  { dmgTaken: 1.0,  regen: 1.0 },
+  scout:    { dmgTaken: 1.15, regen: 1.0 },
+  heavy:    { dmgTaken: 0.7,  regen: 1.0 },
+  medic:    { dmgTaken: 1.0,  regen: 2.2 },
+  ninja:    { dmgTaken: 1.1,  regen: 1.0 },
+  engineer: { dmgTaken: 0.9,  regen: 1.0 },
+  demo:     { dmgTaken: 1.0,  regen: 1.0 },
 };
 const agentOf = id => AGENTS[id] ? id : 'soldier';
 
@@ -394,7 +396,11 @@ export class GameServer extends DurableObject {
       const own = r.flags[p.team], enemyT = p.team === 'red' ? 'blue' : 'red', enemy = r.flags[enemyT];
       if (enemy.carrier === p.id) {                 // carrying — follow + try to capture
         enemy.pos = { x: p.pos.x, y: p.pos.y + 0.2, z: p.pos.z };
-        if (own.atHome && near(p.pos, own.home, 2.4)) {
+        // Capture by carrying the enemy flag back into your own SPAWN ZONE
+        // (x past the no-build line on your side) — no longer requires your
+        // own flag to be home.
+        const inHomeSpawn = p.team === 'red' ? p.pos.x <= -22 : p.pos.x >= 22;
+        if (inHomeSpawn) {
           r.scores[p.team] = (r.scores[p.team] || 0) + 1;
           enemy.carrier = null; enemy.atHome = true; enemy.pos = { ...enemy.home };
           this.broadcast(r, { t: 'flag', ev: 'capture', team: enemyT, by: p.id, name: p.name });

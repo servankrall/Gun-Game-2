@@ -54,7 +54,9 @@ const me = {
   reloading: false, reloadEnd: 0,
   lastShot: 0, lastNade: 0,
   zoomed: false,
+  jumps: 0,
 };
+let jumpPrev = false; // edge-detect the jump key so double-jump fires once per press
 const MAX_NADES = 3;
 
 const keys = {};
@@ -105,14 +107,27 @@ function applyTheme(id) {
 // server (see AGENTS there); everyone still has 100 HP so the health bar is
 // unchanged — HEAVY just takes less damage.
 const AGENTS = {
-  soldier: { name: 'SOLDIER', role: 'Balanced all-rounder',        accent: 0x9aa4b2, speed: 1.0,  jump: 1.0,  nades: 3, blocks: 64 },
-  scout:   { name: 'SCOUT',   role: 'Fast & fragile · +1 grenade', accent: 0x49c26a, speed: 1.2,  jump: 1.15, nades: 4, blocks: 64 },
-  heavy:   { name: 'HEAVY',   role: 'Tank · takes less damage',    accent: 0xe08a2a, speed: 0.85, jump: 0.92, nades: 3, blocks: 80 },
-  medic:   { name: 'MEDIC',   role: 'Regenerates much faster',     accent: 0xf2f2f2, speed: 1.0,  jump: 1.0,  nades: 3, blocks: 64 },
-  ninja:   { name: 'NINJA',   role: 'Agile · very high jump',      accent: 0x9b5cff, speed: 1.15, jump: 1.4,  nades: 3, blocks: 64 },
+  soldier:  { name: 'SOLDIER',    role: 'Balanced all-rounder',        accent: 0x9aa4b2, speed: 1.0,  jump: 1.0,  nades: 3, blocks: 64,  cost: 0 },
+  scout:    { name: 'SCOUT',      role: 'Fast & fragile · +1 grenade', accent: 0x49c26a, speed: 1.2,  jump: 1.15, nades: 4, blocks: 64,  cost: 150 },
+  heavy:    { name: 'HEAVY',      role: 'Tank · takes less damage',    accent: 0xe08a2a, speed: 0.85, jump: 0.92, nades: 3, blocks: 80,  cost: 300 },
+  medic:    { name: 'MEDIC',      role: 'Regenerates much faster',     accent: 0xf2f2f2, speed: 1.0,  jump: 1.0,  nades: 3, blocks: 64,  cost: 300 },
+  ninja:    { name: 'NINJA',      role: 'Double-jump · very agile',    accent: 0x9b5cff, speed: 1.15, jump: 1.4,  nades: 3, blocks: 64,  cost: 500, doubleJump: true },
+  engineer: { name: 'ENGINEER',   role: 'Builder · lots of blocks',    accent: 0x3f9bd6, speed: 0.95, jump: 1.0,  nades: 3, blocks: 110, cost: 600 },
+  demo:     { name: 'DEMOLITION', role: 'Explosives · +2 grenades',    accent: 0xd23b3b, speed: 0.95, jump: 1.0,  nades: 5, blocks: 64,  cost: 450 },
 };
 const AGENT_IDS = Object.keys(AGENTS);
-let myAgent = AGENTS[localStorage.getItem('blockade_agent')] ? localStorage.getItem('blockade_agent') : 'soldier';
+// ---- in-game coins + class unlocks (persisted locally) ----
+let coins = Math.max(0, parseInt(localStorage.getItem('bf_coins')) || 0);
+let unlocked = (() => {
+  try { const u = JSON.parse(localStorage.getItem('bf_unlocked')); if (Array.isArray(u)) return new Set(u); } catch {}
+  return new Set(['soldier']);
+})();
+unlocked.add('soldier'); // soldier is always free
+function isUnlocked(id) { return (AGENTS[id]?.cost || 0) === 0 || unlocked.has(id); }
+function saveCoins() { localStorage.setItem('bf_coins', String(coins)); }
+function saveUnlocked() { localStorage.setItem('bf_unlocked', JSON.stringify([...unlocked])); }
+function awardCoins(n) { coins += n; saveCoins(); const el = $('coinBal'); if (el) el.textContent = '🪙 ' + coins; }
+let myAgent = (AGENTS[localStorage.getItem('blockade_agent')] && isUnlocked(localStorage.getItem('blockade_agent'))) ? localStorage.getItem('blockade_agent') : 'soldier';
 const hex6 = n => '#' + n.toString(16).padStart(6, '0');
 const agentArtSVG = (h) => `<svg viewBox="0 0 20 24" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
   <rect x="2" y="14" width="16" height="10" fill="#4b566d"/><rect x="2" y="14" width="16" height="2" fill="#5c6a86"/>
@@ -212,8 +227,16 @@ function setupMenu() {
     mapSel.addEventListener('change', () => { menuMap = mapSel.value; localStorage.setItem('blockade_map', menuMap); });
   }
 
-  // ---- agent (character) selection ----
+  // ---- agent (character) selection, with coin-gated unlocks ----
   const chips = $('agentchips');
+  function refreshChips() {
+    if (!chips) return;
+    for (const c of chips.children) {
+      const id = c.dataset.id;
+      c.classList.toggle('sel', id === myAgent);
+      c.classList.toggle('locked', !isUnlocked(id));
+    }
+  }
   function renderAgent() {
     const a = AGENTS[myAgent];
     $('agentArt').innerHTML = agentArtSVG(hex6(a.accent));
@@ -221,17 +244,44 @@ function setupMenu() {
     $('agentRole').textContent = a.role;
     const cf = document.querySelector('.cardframe');
     if (cf) cf.style.borderColor = hex6(a.accent);
-    for (const c of chips.children) c.classList.toggle('sel', c.dataset.id === myAgent);
+    const cb = $('coinBal'); if (cb) cb.textContent = '🪙 ' + coins;
+    refreshChips();
   }
-  function pickAgent(id) { if (!AGENTS[id]) return; myAgent = id; localStorage.setItem('blockade_agent', id); renderAgent(); }
-  function cycle(dir) { const i = AGENT_IDS.indexOf(myAgent); pickAgent(AGENT_IDS[(i + dir + AGENT_IDS.length) % AGENT_IDS.length]); }
+  // Clicking an owned class selects it; clicking a locked class buys it if you
+  // have enough coins, otherwise tells you how many more you need.
+  function buyOrPick(id) {
+    if (!AGENTS[id]) return;
+    const err = $('menuErr');
+    if (isUnlocked(id)) {
+      myAgent = id; localStorage.setItem('blockade_agent', id);
+      if (err) err.textContent = '';
+      renderAgent();
+      return;
+    }
+    const cost = AGENTS[id].cost || 0;
+    if (coins >= cost) {
+      coins -= cost; saveCoins(); unlocked.add(id); saveUnlocked();
+      myAgent = id; localStorage.setItem('blockade_agent', id);
+      if (err) err.textContent = `Unlocked ${AGENTS[id].name}!`;
+      renderAgent();
+    } else {
+      if (err) err.textContent = `${AGENTS[id].name} is locked — need ${cost - coins} more 🪙 (you have ${coins})`;
+    }
+  }
+  function cycle(dir) {
+    const owned = AGENT_IDS.filter(isUnlocked);
+    const i = Math.max(0, owned.indexOf(myAgent));
+    const n = owned[(i + dir + owned.length) % owned.length];
+    if (n) { myAgent = n; localStorage.setItem('blockade_agent', n); renderAgent(); }
+  }
   if (chips) {
     chips.innerHTML = '';
     for (const id of AGENT_IDS) {
       const c = document.createElement('div');
       c.className = 'chip'; c.dataset.id = id;
-      c.innerHTML = `<i style="background:${hex6(AGENTS[id].accent)}"></i>${AGENTS[id].name}`;
-      c.addEventListener('click', () => pickAgent(id));
+      const lock = isUnlocked(id) ? '' : `<b class="lk">🔒${AGENTS[id].cost}</b>`;
+      c.innerHTML = `<i style="background:${hex6(AGENTS[id].accent)}"></i>${AGENTS[id].name}${lock}`;
+      c.addEventListener('click', () => buyOrPick(id));
       chips.appendChild(c);
     }
   }
@@ -537,6 +587,7 @@ function showMatchOver(winner, sc, winnerName) {
   const o = $('matchOver');
   if (gameMode === 'gg') {
     const win = (winnerName && winnerName === myName);
+    awardCoins(win ? 120 : 40);
     $('matchOverTitle').textContent = (winnerName || 'SOMEONE') + ' WINS!';
     $('matchOverTitle').style.color = win ? '#ffd24a' : (TEAM_COL[winner] || '#fff');
     $('matchOverSub').textContent = (win ? 'You mastered every weapon! ' : 'Beaten to the last weapon. ') + 'Next match starting...';
@@ -544,6 +595,7 @@ function showMatchOver(winner, sc, winnerName) {
     return;
   }
   const win = (winner === myTeam);
+  awardCoins(win ? 120 : 40);
   $('matchOverTitle').textContent = (winner === 'red' ? 'RED' : 'BLUE') + ' TEAM WINS';
   $('matchOverTitle').style.color = TEAM_COL[winner] || '#fff';
   $('matchOverSub').textContent = (win ? 'Victory! ' : 'Defeat. ') + `${scores.red} : ${scores.blue}  —  next match starting...`;
@@ -570,6 +622,7 @@ function onMyKill() {
   if (multiKill >= 2) { msg = MULTI_NAMES[Math.min(multiKill, 5)]; col = '#ff5533'; }
   if (SPREE_NAMES[killStreak]) { msg = SPREE_NAMES[killStreak]; col = '#ffd24a'; } // spree milestone wins
   if (msg) announce(msg, col);
+  awardCoins(10); // coins toward unlocking classes
 }
 
 // ============================================================
@@ -972,7 +1025,16 @@ function movePlayer(dt) {
   me.vel.z += (wishZ - me.vel.z) * Math.min(1, accel * dt);
   me.vel.y -= GRAVITY * dt;
 
-  if (keys['Space'] && me.onGround) { me.vel.y = JUMP_V * (AGENTS[myAgent]?.jump || 1); me.onGround = false; }
+  // jump — classes with doubleJump get one extra mid-air jump per press
+  if (me.onGround) me.jumps = 0;
+  const maxJumps = AGENTS[myAgent]?.doubleJump ? 2 : 1;
+  const spaceNow = !!keys['Space'];
+  if (spaceNow && !jumpPrev && (me.onGround || me.jumps < maxJumps)) {
+    me.vel.y = JUMP_V * (AGENTS[myAgent]?.jump || 1);
+    me.onGround = false;
+    me.jumps++;
+  }
+  jumpPrev = spaceNow;
 
   // axis-by-axis integration
   const p = me.pos;
@@ -1367,7 +1429,14 @@ function spawnTracer(origin, dir, wkey, dist) {
   tracers.push({ obj: line, ttl: 0.09 });
 }
 
+const MAX_PARTICLES = 260; // hard cap so heavy firefights can't flood the scene and stutter
 function burst(pos, color, n, spd) {
+  // drop the oldest particles if we're about to exceed the cap
+  let over = particles.length + n - MAX_PARTICLES;
+  while (over-- > 0 && particles.length) {
+    const p = particles.shift();
+    scene.remove(p.obj); p.obj.geometry.dispose(); p.obj.material.dispose();
+  }
   for (let i = 0; i < n; i++) {
     const s = 0.05 + Math.random() * 0.06;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), new THREE.MeshBasicMaterial({ color }));
@@ -1553,8 +1622,9 @@ function updateViewModel(dt, moving) {
 }
 
 function selectSlot(i) {
-  if (gameMode === 'gg') return;   // gun game forces your weapon by rung
-  if (i >= SLOTS.length || i === me.slot) return;
+  if (i < 0 || i >= SLOTS.length || i === me.slot) return;
+  // Gun Game: only the current rung weapon and blocks are selectable.
+  if (gameMode === 'gg' && SLOTS[i] !== ggWeaponKey() && SLOTS[i] !== 'blocks') return;
   me.slot = i;
   me.zoomed = false;
   for (const [k, m] of Object.entries(vm.models)) m.visible = (k === SLOTS[i]);
@@ -1698,14 +1768,18 @@ function drawIcon(kind) {
 function updateHotbar() {
   const bar = $('hotbar');
   bar.innerHTML = '';
-  SLOTS.forEach((s, i) => {
+  // Gun Game shows only your current rung weapon + blocks; everything else is hidden.
+  const visible = gameMode === 'gg' ? [ggWeaponKey(), 'blocks'] : SLOTS;
+  visible.forEach((s, pos) => {
+    const i = SLOTS.indexOf(s);
     const div = document.createElement('div');
     div.className = 'slot' + (i === me.slot ? ' sel' : '');
+    div.dataset.slot = i;
     const img = document.createElement('img');
     img.src = drawIcon(s);
     div.appendChild(img);
     const key = document.createElement('span');
-    key.className = 'key'; key.textContent = i + 1;
+    key.className = 'key'; key.textContent = pos + 1;
     div.appendChild(key);
     if (s === 'blocks') {
       const cnt = document.createElement('span');
@@ -1784,7 +1858,11 @@ function setupInput() {
     if (e.code === 'Tab') { e.preventDefault(); tabHeld = true; updateScoreboard(); }
     if (e.code === 'KeyR') startReload();
     if (e.code === 'KeyG' && !e.repeat) throwGrenade();
-    if (/^Digit[1-9]$/.test(e.code)) selectSlot(parseInt(e.code[5]) - 1);
+    if (/^Digit[1-9]$/.test(e.code)) {
+      const n = parseInt(e.code[5]) - 1;
+      if (gameMode === 'gg') { const v = [ggWeaponKey(), 'blocks']; if (n < v.length) selectSlot(SLOTS.indexOf(v[n])); }
+      else selectSlot(n);
+    }
   });
   document.addEventListener('keyup', e => {
     if (e.code === 'KeyV') setTalking(false);
@@ -1919,7 +1997,7 @@ function setupTouch() {
   $('hotbar').addEventListener('touchstart', e => {
     const slot = e.target.closest('.slot');
     if (!slot) return;
-    const i = [...$('hotbar').children].indexOf(slot);
+    const i = +slot.dataset.slot;
     if (i >= 0) selectSlot(i);
     e.preventDefault();
   }, { passive: false });
@@ -1948,7 +2026,7 @@ function initScene() {
   sunLight = sun;
   sun.position.set(40, 70, 25);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(1024, 1024); // 1024 instead of 2048 — 4x cheaper shadow pass, big win on the occasional stutter
   sun.shadow.camera.left = -50; sun.shadow.camera.right = 50;
   sun.shadow.camera.top = 50; sun.shadow.camera.bottom = -50;
   sun.shadow.camera.far = 200;

@@ -61,6 +61,10 @@
   #agentchips .chip:hover { background: rgba(255,255,255,.12); }
   #agentchips .chip.sel { border-color: #ffc23a; color: #fff; background: rgba(255,194,58,.14); }
   #agentchips .chip i { width: 12px; height: 12px; display: inline-block; border: 1px solid #000; }
+  #agentchips .chip.locked { opacity: .55; }
+  #agentchips .chip.locked:hover { opacity: .8; }
+  #agentchips .chip .lk { color: #ffd24a; font-size: 8px; margin-left: 2px; }
+  #coinBal { text-align: center; color: #ffd24a; font-size: 10px; letter-spacing: 1px; margin: 2px 0 6px; }
 
   /* ---- bottom bar ---- */
   #bottombar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 26px 8px; }
@@ -324,6 +328,7 @@
       <div class="pslot ghost"><span>+</span></div>
     </div>
 
+    <div id="coinBal">🪙 0</div>
     <div id="agentchips"></div>
 
     <div id="bottombar">
