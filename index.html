@@ -206,6 +206,7 @@
   #btnReload { right: 34px;  bottom: 214px; width: 60px; height: 60px; font-size: 8px; }
   #btnVoice  { right: 104px; bottom: 214px; width: 60px; height: 60px; font-size: 9px; }
   #btnVoice.on { background: rgba(44,140,44,.6); border-color: #4d4; }
+  #btnNade   { right: 174px; bottom: 214px; width: 60px; height: 60px; font-size: 8px; }
   /* let mobile players tap the hotbar to switch weapons (the HUD itself is click-through) */
   #hotbar { pointer-events: auto; }
   #btnSprint { left: 158px; bottom: 32px; width: 58px; height: 58px; font-size: 8px; }
@@ -245,13 +246,18 @@
     <div class="splash">Red vs Blue!</div>
     <div class="sub">3D SHOOTER · RED VS BLUE</div>
     <input id="nameInput" class="mc-input" maxlength="16" placeholder="Enter your nickname" autocomplete="off">
+    <select id="diffSel" class="mc-input" title="Bot difficulty">
+      <option value="easy">BOTS: EASY</option>
+      <option value="normal" selected>BOTS: NORMAL</option>
+      <option value="hard">BOTS: HARD</option>
+    </select>
     <button id="playBtn" class="mc-btn">PLAY</button>
     <button id="inviteBtn" class="mc-btn">INVITE FRIENDS</button>
     <div id="sensRow"><span>LOOK SENS</span><input id="sensRange" type="range" min="0.4" max="2" step="0.05"><span id="sensVal">1.00x</span></div>
     <div class="err" id="menuErr"></div>
     <div class="hint">
       WASD — move · LMB — fire · RMB — aim<br>
-      1-6 — weapons · SPACE — jump · SHIFT — sprint · TAB — scoreboard<br>
+      1-6 — weapons · G — grenade · SPACE — jump · SHIFT — sprint · TAB — scoreboard<br>
       T — chat · V (hold) — voice · 5 — pickaxe · 6 — bazooka
     </div>
     <div class="ver">Blockfield v1.0</div>
@@ -285,6 +291,7 @@
     <div id="ammo">
       <div class="num" id="ammoNum">30 / 30</div>
       <div class="wname" id="weaponName">RIFLE</div>
+      <div class="wname" id="nadeHud">🧨 x3 <span style="color:#888">[G]</span></div>
       <div class="rel" id="reloadLbl">RELOADING...</div>
     </div>
     <div id="deathScreen">
@@ -310,6 +317,7 @@
       <div class="mbtn" id="btnAim">AIM</div>
       <div class="mbtn" id="btnJump">JUMP</div>
       <div class="mbtn" id="btnReload">RELOAD</div>
+      <div class="mbtn" id="btnNade">🧨</div>
       <div class="mbtn" id="btnVoice">MIC</div>
       <div class="mbtn" id="btnSprint">RUN</div>
     </div>

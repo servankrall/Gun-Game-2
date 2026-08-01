@@ -91,14 +91,23 @@ for (const b of buildMapBlocks()) {
 }
 const solid = (x, y, z) => SOLID.has(`${Math.floor(x)},${Math.floor(y)},${Math.floor(z)}`);
 const groundTop = (x, z) => { const v = GROUND.get(`${Math.floor(x)},${Math.floor(z)}`); return v === undefined ? -1 : v; };
+// Room-aware solidity: the static map, minus blocks players have destroyed, plus
+// blocks players have built. Bot line-of-sight must use this so player-built
+// cover actually blocks bot fire (bots were shooting through built walls).
+function solidRoom(r, x, y, z) {
+  const k = `${Math.floor(x)},${Math.floor(y)},${Math.floor(z)}`;
+  if (r.placed.has(k)) return true;
+  if (r.destroyed.has(k)) return false;
+  return SOLID.has(k);
+}
 // true if the straight segment a->b is clear of solid voxels (bot line of sight)
-function losClear(ax, ay, az, bx, by, bz) {
+function losClear(r, ax, ay, az, bx, by, bz) {
   const dx = bx - ax, dy = by - ay, dz = bz - az;
   const dist = Math.hypot(dx, dy, dz);
   const steps = Math.ceil(dist / 0.34);
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
-    if (solid(ax + dx * t, ay + dy * t, az + dz * t)) return false;
+    if (solidRoom(r, ax + dx * t, ay + dy * t, az + dz * t)) return false;
   }
   return true;
 }
@@ -107,7 +116,7 @@ function losClear(ax, ay, az, bx, by, bz) {
 // Tuning
 // ============================================================
 const CFG = {
-  scoreLimit: 40,          // team kills to win a match
+  scoreLimit: 150,         // team kills to win a match
   tick: 50,                // ms between state broadcasts / bot updates
   bots: true,
   botTeamTarget: 3,        // desired combatants (players+bots) per team
@@ -117,6 +126,12 @@ const CFG = {
   regenRate: 14,           // HP restored per second while regenerating
 };
 const WEAPON = { rifle: { dmg: 16, rate: 220, range: 22 } };
+// Per-difficulty bot skill range (skill scales fire rate + accuracy).
+const SKILL = {
+  easy:   { min: 0.40, span: 0.35 },
+  normal: { min: 0.72, span: 0.56 },
+  hard:   { min: 1.05, span: 0.60 },
+};
 
 function spawnFor(team) {
   const z = Math.random() * 16 - 8;
@@ -138,7 +153,7 @@ export class GameServer extends DurableObject {
   room(id) {
     let r = this.rooms.get(id);
     if (!r) {
-      r = { id, clients: new Map(), bots: new Map(), scores: { red: 0, blue: 0 }, placed: new Map(), destroyed: new Map(), over: false };
+      r = { id, clients: new Map(), bots: new Map(), scores: { red: 0, blue: 0 }, placed: new Map(), destroyed: new Map(), over: false, diff: 'normal' };
       this.rooms.set(id, r);
     }
     return r;
@@ -194,6 +209,8 @@ export class GameServer extends DurableObject {
     const pos = spawnFor(team);
     const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, lastHit: 0 };
     r.clients.set(id, { ws, player });
+    // First player in a room sets the bot difficulty for it.
+    if (r.clients.size === 1 && ['easy', 'normal', 'hard'].includes(m.diff)) r.diff = m.diff;
 
     this.send(ws, {
       t: 'welcome', id, team, pos, ry: player.ry, scores: r.scores, room: roomId, count: this.count(r), scoreLimit: CFG.scoreLimit,
@@ -239,6 +256,10 @@ export class GameServer extends DurableObject {
         this.broadcastExcept(r, id, { t: 'destroy', x: m.x, y: m.y, z: m.z });
         break;
       }
+      case 'nade': { // relay a thrown grenade so everyone sees it fly + explode
+        this.broadcastExcept(r, id, { t: 'nade', from: m.from, vel: m.vel });
+        break;
+      }
       case 'respawn':
         p.alive = true; p.hp = 100; p.pos = spawnFor(p.team); p.ry = ryFor(p.team); p.rx = 0;
         this.broadcast(r, { t: 'respawn', id: p.id, pos: p.pos });
@@ -270,7 +291,16 @@ export class GameServer extends DurableObject {
       return;
     }
     tgt.hp = 0; tgt.alive = false; tgt.deaths++;
-    if (attacker) attacker.kills++;
+    tgt.streak = 0; // dying breaks your streak
+    if (attacker) {
+      attacker.kills++;
+      attacker.streak = (attacker.streak || 0) + 1;
+      // Kill-streak reward: every 3rd kill without dying refills you to full health.
+      if (attacker.streak % 3 === 0 && attacker.alive) {
+        attacker.hp = 100; attacker.lastHit = 0;
+        if (!attacker.bot) { const c = r.clients.get(attacker.id); if (c) this.send(c.ws, { t: 'heal', hp: 100, streak: attacker.streak }); }
+      }
+    }
     tgt.respawnAt = Date.now() + (tgt.bot ? 3000 : 3500); // auto-respawn (client never asks)
     if (attacker) r.scores[attacker.team] = (r.scores[attacker.team] || 0) + 1;
     this.broadcast(r, { t: 'death', victim: tgt.id, killer: attacker ? attacker.id : tgt.id, head });
@@ -334,7 +364,8 @@ export class GameServer extends DurableObject {
     if (free.length) nm = free[Math.floor(Math.random() * free.length)];
     else { let i = 2; do { nm = CFG.botNames[Math.floor(Math.random() * CFG.botNames.length)] + ' ' + i++; } while (used.has(nm)); }
     const pos = spawnFor(team);
-    const bot = { id, name: nm, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, bot: true, nextShot: 0, wander: Math.random() * Math.PI * 2, repick: 0, respawnAt: 0, skill: 0.72 + Math.random() * 0.56, lastHit: 0 };
+    const skill = SKILL[r.diff] || SKILL.normal;
+    const bot = { id, name: nm, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, bot: true, nextShot: 0, wander: Math.random() * Math.PI * 2, repick: 0, respawnAt: 0, skill: skill.min + Math.random() * skill.span, lastHit: 0 };
     r.bots.set(id, bot);
     this.broadcast(r, { t: 'join', p: this.pub(bot) });
   }
@@ -361,7 +392,7 @@ export class GameServer extends DurableObject {
         else { this.stepBot(r, bot, ang + Math.PI / 2 * (bot.id % 2 ? 1 : -1), dt * 0.6); moving = 0.6; }
         const w = WEAPON.rifle;
         if (best < w.range && now >= bot.nextShot &&
-            losClear(bot.pos.x, bot.pos.y + 1.5, bot.pos.z, target.pos.x, target.pos.y + 1.0, target.pos.z)) {
+            losClear(r, bot.pos.x, bot.pos.y + 1.5, bot.pos.z, target.pos.x, target.pos.y + 1.0, target.pos.z)) {
           bot.nextShot = now + w.rate / bot.skill + Math.random() * 260;
           const dir = { x: -Math.sin(ang), y: 0.02, z: -Math.cos(ang) };
           const from = { x: bot.pos.x, y: bot.pos.y + 1.5, z: bot.pos.z };

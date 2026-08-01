@@ -44,10 +44,12 @@ const me = {
   slot: 0,
   ammo: { rifle: 30, shotgun: 6, sniper: 5, bazooka: 1 },
   blocks: 64,
+  nades: 3,
   reloading: false, reloadEnd: 0,
-  lastShot: 0,
+  lastShot: 0, lastNade: 0,
   zoomed: false,
 };
+const MAX_NADES = 3;
 
 const keys = {};
 let mouseDown = false;
@@ -62,11 +64,12 @@ const mobileMove = { x: 0, z: 0, active: false };
 
 // Room / match / feel
 let myRoom = (new URLSearchParams(location.search).get('room') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
-let scoreLimit = 40;
+let scoreLimit = 150;
+let botDiff = 'normal';
 let killStreak = 0;
 let lookMul = parseFloat(localStorage.getItem('bf_sens') || '1') || 1;
 
-const tracers = [], particles = [], flashes = [], rockets = [];
+const tracers = [], particles = [], flashes = [], rockets = [], grenades = [];
 
 // ============================================================
 // Audio (tiny synth)
@@ -116,6 +119,8 @@ const SND = {
   boom: (vol = 0.5) => { noiseBurst(0.7, 250, vol); tone(70, 0.5, vol * 0.8, 'sawtooth', -40); },
   spawn: () => { tone(520, 0.08, 0.12, 'square'); setTimeout(() => tone(780, 0.1, 0.12, 'square'), 90); },
   kill: () => { tone(660, 0.07, 0.14, 'square'); setTimeout(() => tone(880, 0.07, 0.14, 'square'), 70); setTimeout(() => tone(1100, 0.1, 0.14, 'square'), 140); },
+  nade: () => { tone(320, 0.05, 0.12, 'square'); noiseBurst(0.05, 1600, 0.08, 'highpass'); },
+  lowhp: () => { tone(120, 0.16, 0.16, 'sine'); },
 };
 
 // ============================================================
@@ -141,9 +146,12 @@ function setupMenu() {
   const input = $('nameInput'), btn = $('playBtn'), err = $('menuErr');
   input.value = localStorage.getItem('blockade_name') || '';
   input.focus();
+  const diffSel = $('diffSel');
+  if (diffSel) diffSel.value = localStorage.getItem('blockade_diff') || 'normal';
   const start = () => {
     const name = input.value.trim();
     if (name.length < 2) { err.textContent = 'Nickname must be at least 2 characters!'; return; }
+    if (diffSel) { botDiff = diffSel.value; localStorage.setItem('blockade_diff', botDiff); }
     localStorage.setItem('blockade_name', name);
     btn.disabled = true; err.textContent = '';
     connect(name);
@@ -188,7 +196,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -223,7 +231,7 @@ function handleMsg(m) {
       me.pos.set(m.pos.x, m.pos.y, m.pos.z);
       me.ry = m.ry; me.rx = 0;
       Object.assign(scores, m.scores);
-      scoreLimit = m.scoreLimit || 40;
+      scoreLimit = m.scoreLimit || 150;
       updateCount(m.count);
       for (const p of m.players) addRemote(p);
       // destroyed map blocks first, then player-built blocks (a built block may occupy a destroyed spot)
@@ -277,6 +285,7 @@ function handleMsg(m) {
     }
     case 'heal': {
       if (!me.dead) { me.hp = m.hp; updateHearts(); } // passive regen — no hurt fx
+      if (m.streak) { announce(`${m.streak} KILL STREAK — HEALED!`); SND.spawn(); }
       break;
     }
     case 'hitconfirm': {
@@ -317,7 +326,7 @@ function handleMsg(m) {
         me.vel.set(0, 0, 0);
         me.hp = 100; me.dead = false;
         me.ammo = { rifle: 30, shotgun: 6, sniper: 5, bazooka: 1 };
-        me.blocks = 64; me.reloading = false;
+        me.blocks = 64; me.nades = MAX_NADES; me.reloading = false;
         me.ry = myTeam === 'red' ? -Math.PI / 2 : Math.PI / 2; me.rx = 0;
         updateHearts(); updateAmmoHud(); updateHotbar();
         $('deathScreen').style.display = 'none';
@@ -341,6 +350,10 @@ function handleMsg(m) {
       break;
     case 'destroy':
       removeBlockLocal(m.x, m.y, m.z);
+      break;
+    case 'nade':
+      spawnGrenade(new THREE.Vector3(m.from.x, m.from.y, m.from.z),
+                   new THREE.Vector3(m.vel.x, m.vel.y, m.vel.z), false);
       break;
     case 'rtc':
       handleRtcSignal(m.from, m.data);
@@ -1042,6 +1055,80 @@ function explode(r) {
 }
 
 // ============================================================
+// Grenades (thrown, arc under gravity, timed fuse, area blast)
+// ============================================================
+const GR_FUSE = 1.5, GR_BLAST_R = 5, GR_BLOCK_R = 2, GR_DMG = 95;
+
+function spawnGrenade(pos, vel, isLocal) {
+  const obj = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.24), new THREE.MeshLambertMaterial({ color: 0x2f7d32 }));
+  obj.position.copy(pos); obj.castShadow = true;
+  scene.add(obj);
+  grenades.push({ obj, pos: pos.clone(), vel: vel.clone(), fuse: GR_FUSE, isLocal });
+}
+
+function throwGrenade() {
+  const now = performance.now();
+  if (me.dead || me.nades <= 0 || now - me.lastNade < 650) return;
+  me.lastNade = now; me.nades--;
+  const origin = camera.getWorldPosition(new THREE.Vector3());
+  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+  const vel = dir.clone().multiplyScalar(17); vel.y += 4.5; // lob it in an arc
+  const from = origin.clone().addScaledVector(dir, 0.6);
+  spawnGrenade(from, vel, true);
+  netSend({ t: 'nade', from: { x: from.x, y: from.y, z: from.z }, vel: { x: vel.x, y: vel.y, z: vel.z } });
+  SND.nade();
+  updateAmmoHud();
+}
+
+function updateGrenades(dt) {
+  for (let i = grenades.length - 1; i >= 0; i--) {
+    const g = grenades[i];
+    g.fuse -= dt;
+    g.vel.y -= 22 * dt; // gravity
+    const blk = (x, y, z) => solid(Math.floor(x), Math.floor(y), Math.floor(z));
+    // per-axis voxel collision so the grenade bounces off walls/floor
+    let nx = g.pos.x + g.vel.x * dt;
+    if (blk(nx, g.pos.y, g.pos.z)) g.vel.x *= -0.4; else g.pos.x = nx;
+    let nz = g.pos.z + g.vel.z * dt;
+    if (blk(g.pos.x, g.pos.y, nz)) g.vel.z *= -0.4; else g.pos.z = nz;
+    let ny = g.pos.y + g.vel.y * dt;
+    if (blk(g.pos.x, ny, g.pos.z)) { if (g.vel.y < 0) { g.vel.x *= 0.7; g.vel.z *= 0.7; } g.vel.y *= -0.35; }
+    else g.pos.y = ny;
+    if (g.pos.y < 0.2) { g.pos.y = 0.2; g.vel.y *= -0.35; g.vel.x *= 0.7; g.vel.z *= 0.7; }
+    g.obj.position.copy(g.pos);
+    g.obj.rotation.x += dt * 6; g.obj.rotation.y += dt * 4;
+    if (g.fuse <= 0) { explodeGrenade(g.pos, g.isLocal); scene.remove(g.obj); grenades.splice(i, 1); }
+  }
+}
+
+function explodeGrenade(p, isLocal) {
+  burst(p, 0xff7722, 22, 9); burst(p, 0xffcc44, 14, 7); burst(p, 0x777777, 16, 5);
+  const dist = camera ? p.distanceTo(me.pos) : 50;
+  SND.boom(Math.max(0.08, 0.6 * Math.min(1, 16 / (dist + 1))));
+  if (dist < GR_BLAST_R * 2) me.rx += (Math.random() - 0.5) * 0.06;
+  if (!isLocal) return; // only the thrower is authoritative for damage + blocks
+  for (const rem of remotes.values()) {
+    if (!rem.alive || rem.team === myTeam) continue;
+    const c = rem.group.position.clone(); c.y += 0.95;
+    const d = c.distanceTo(p);
+    if (d > GR_BLAST_R) continue;
+    const dmg = Math.round(GR_DMG * (1 - d / GR_BLAST_R) + 12);
+    netSend({ t: 'hit', target: rem.id, dmg, w: 'grenade', head: false });
+  }
+  const cx = Math.floor(p.x), cy = Math.floor(p.y), cz = Math.floor(p.z);
+  for (let dx = -GR_BLOCK_R; dx <= GR_BLOCK_R; dx++)
+    for (let dy = -GR_BLOCK_R; dy <= GR_BLOCK_R; dy++)
+      for (let dz = -GR_BLOCK_R; dz <= GR_BLOCK_R; dz++) {
+        if (dx * dx + dy * dy + dz * dz > GR_BLOCK_R * GR_BLOCK_R + 1) continue;
+        const x = cx + dx, y = cy + dy, z = cz + dz;
+        if (y < 1 || x < -HALF || x > HALF - 1 || z < -HALF || z > HALF - 1) continue;
+        if (!collision.has(`${x},${y},${z}`)) continue;
+        removeBlockLocal(x, y, z, true);
+        netSend({ t: 'destroy', x, y, z });
+      }
+}
+
+// ============================================================
 // FX
 // ============================================================
 function spawnTracer(origin, dir, wkey, dist) {
@@ -1336,6 +1423,7 @@ function updateAmmoHud() {
   const w = WEAPONS[wkey];
   $('weaponName').textContent = w.name;
   $('ammoNum').textContent = w.builder ? `${me.blocks}` : w.tool ? '—' : `${me.ammo[wkey]} / ${w.mag}`;
+  const nh = $('nadeHud'); if (nh) nh.innerHTML = `🧨 x${me.nades} <span style="color:#888">[G]</span>`;
 }
 
 function feed(text, teamA, teamB) {
@@ -1396,6 +1484,7 @@ function setupInput() {
     keys[e.code] = true;
     if (e.code === 'Tab') { e.preventDefault(); tabHeld = true; updateScoreboard(); }
     if (e.code === 'KeyR') startReload();
+    if (e.code === 'KeyG' && !e.repeat) throwGrenade();
     if (/^Digit[1-9]$/.test(e.code)) selectSlot(parseInt(e.code[5]) - 1);
   });
   document.addEventListener('keyup', e => {
@@ -1514,6 +1603,7 @@ function setupTouch() {
   press('btnFire', () => { mouseDown = true; if (!me.dead) tryShoot(performance.now()); }, () => { mouseDown = false; });
   press('btnJump', () => { keys['Space'] = true; }, () => { keys['Space'] = false; });
   press('btnReload', () => startReload());
+  press('btnNade', () => throwGrenade());
   press('btnAim', () => { me.zoomed = !me.zoomed; });
   press('btnSprint', () => { sprintHeld = true; }, () => { sprintHeld = false; });
 
@@ -1600,7 +1690,7 @@ function startGame() {
 // ============================================================
 // Minimap (top-down radar, rotated so the player faces up)
 // ============================================================
-let miniCtx = null, lastMini = 0;
+let miniCtx = null, lastMini = 0, lastLowHp = 0;
 function drawMinimap() {
   const cv = $('minimap'); if (!cv) return;
   if (!miniCtx) miniCtx = cv.getContext('2d');
@@ -1657,10 +1747,12 @@ function loop() {
 
     updateRemotes(dt);
     updateRockets(dt);
+    updateGrenades(dt);
     updateFx(dt);
     updateViewModel(dt, moving > 0);
     if (tabHeld) updateScoreboard();
     if (now - lastMini > 90) { lastMini = now; drawMinimap(); }
+    if (!me.dead && me.hp > 0 && me.hp < 30 && now - lastLowHp > 850) { lastLowHp = now; SND.lowhp(); }
 
     // clouds drift
     scene.traverse(o => {
