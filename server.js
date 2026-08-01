@@ -175,7 +175,7 @@ export class GameServer extends DurableObject {
   room(id) {
     let r = this.rooms.get(id);
     if (!r) {
-      r = { id, clients: new Map(), bots: new Map(), scores: { red: 0, blue: 0 }, placed: new Map(), destroyed: new Map(), over: false, diff: 'normal', mode: 'dm', flags: null };
+      r = { id, clients: new Map(), bots: new Map(), scores: { red: 0, blue: 0 }, placed: new Map(), destroyed: new Map(), over: false, diff: 'normal', mode: 'dm', flags: null, map: 'desert' };
       this.rooms.set(id, r);
     }
     return r;
@@ -237,11 +237,12 @@ export class GameServer extends DurableObject {
     if (r.clients.size === 1) {
       if (['easy', 'normal', 'hard'].includes(m.diff)) r.diff = m.diff;
       if (m.mode === 'ctf') { r.mode = 'ctf'; r.flags = makeFlags(); }
+      if (['desert', 'arctic', 'volcano', 'night'].includes(m.map)) r.map = m.map;
     }
 
     this.send(ws, {
       t: 'welcome', id, team, pos, ry: player.ry, scores: r.scores, room: roomId, count: this.count(r),
-      mode: r.mode, limit: r.mode === 'ctf' ? CFG.captureLimit : CFG.scoreLimit,
+      mode: r.mode, map: r.map, limit: r.mode === 'ctf' ? CFG.captureLimit : CFG.scoreLimit,
       flags: r.flags ? this.flagPub(r) : undefined,
       players: this.entities(r).filter(e => e.id !== id).map(e => this.pub(e)),
       placed: [...r.placed.values()], destroyed: [...r.destroyed.values()],

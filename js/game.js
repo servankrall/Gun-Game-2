@@ -71,6 +71,28 @@ let scoreLimit = 150;
 let botDiff = 'normal';
 let gameMode = 'dm';   // 'dm' (deathmatch) | 'ctf' (capture the flag)
 let menuMode = 'dm';   // mode chosen on the menu, sent at join
+let sunLight = null, ambLight = null;
+let mapTheme = 'desert', menuMap = 'desert';
+// Map themes: same arena collision, different look (materials + sky/fog/light).
+const THEMES = {
+  desert:  { name: 'DESERT TEMPLE', sky: 0x87ceeb, fog: 0x87ceeb, fogN: 60, fogF: 140, sun: 0xfff4d6, sunI: 1.6, amb: 0xffffff, ambI: 0.75, tints: {} },
+  arctic:  { name: 'ARCTIC OUTPOST', sky: 0xcfe6f2, fog: 0xdaeaf2, fogN: 45, fogF: 120, sun: 0xeaf4ff, sunI: 1.5, amb: 0xdfeaff, ambI: 0.9,
+             tints: { sand: 0xdff0ff, gravel: 0xb9c9d6, dirt: 0xcfe0ea, stone: 0xc2d4e0, cobble: 0xb8c8d4 } },
+  volcano: { name: 'VOLCANO', sky: 0x2a1512, fog: 0x3a1a14, fogN: 34, fogF: 105, sun: 0xffb27a, sunI: 1.35, amb: 0x3a2420, ambI: 0.6,
+             tints: { sand: 0x5c4a42, gravel: 0x352c28, dirt: 0x4a2a20, stone: 0x463c36, cobble: 0x3c332e } },
+  night:   { name: 'NIGHT RAID', sky: 0x0b1020, fog: 0x0c1530, fogN: 40, fogF: 118, sun: 0xaebfff, sunI: 0.85, amb: 0x4a5a7a, ambI: 0.78,
+             tints: { sand: 0x8a8f9c, gravel: 0x5a606c, dirt: 0x6a6250, stone: 0x6b7280, cobble: 0x5a6270 } },
+};
+const MAP_IDS = ['desert', 'arctic', 'volcano', 'night'];
+function applyTheme(id) {
+  mapTheme = THEMES[id] ? id : 'desert';
+  const t = THEMES[mapTheme];
+  if (scene) { scene.background = new THREE.Color(t.sky); scene.fog = new THREE.Fog(t.fog, t.fogN, t.fogF); }
+  if (sunLight) { sunLight.color.setHex(t.sun); sunLight.intensity = t.sunI; }
+  if (ambLight) { ambLight.color.setHex(t.amb); ambLight.intensity = t.ambI; }
+  for (const ty of ['sand', 'gravel', 'dirt', 'stone', 'cobble']) if (mats[ty]) mats[ty].color.setHex(0xffffff);
+  for (const ty in t.tints) if (mats[ty]) mats[ty].color.setHex(t.tints[ty]);
+}
 
 // Selectable agents. Client perks: speed/jump (movement), starting nades/blocks,
 // accent colour (helmet/shoulders). Damage-taken and regen perks live on the
@@ -175,6 +197,12 @@ function setupMenu() {
   input.focus();
   const diffSel = $('diffSel');
   if (diffSel) diffSel.value = localStorage.getItem('blockade_diff') || 'normal';
+  const mapSel = $('mapSel');
+  if (mapSel) {
+    menuMap = MAP_IDS.includes(localStorage.getItem('blockade_map')) ? localStorage.getItem('blockade_map') : 'desert';
+    mapSel.value = menuMap;
+    mapSel.addEventListener('change', () => { menuMap = mapSel.value; localStorage.setItem('blockade_map', menuMap); });
+  }
 
   // ---- agent (character) selection ----
   const chips = $('agentchips');
@@ -261,7 +289,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -298,6 +326,7 @@ function handleMsg(m) {
       Object.assign(scores, m.scores);
       gameMode = m.mode || 'dm';
       scoreLimit = m.limit || m.scoreLimit || 150;
+      applyTheme(m.map || 'desert');
       updateCount(m.count);
       for (const p of m.players) addRemote(p);
       // destroyed map blocks first, then player-built blocks (a built block may occupy a destroyed spot)
@@ -1805,8 +1834,10 @@ function initScene() {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  ambLight = new THREE.AmbientLight(0xffffff, 0.75);
+  scene.add(ambLight);
   const sun = new THREE.DirectionalLight(0xfff4d6, 1.6);
+  sunLight = sun;
   sun.position.set(40, 70, 25);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);

@@ -67,7 +67,7 @@
   .bside { flex: 1; display: flex; align-items: center; }
   .bside.right { justify-content: flex-end; }
   .practice { color: #9fb0d0; font-size: 9px; display: flex; align-items: center; gap: 8px; letter-spacing: 1px; }
-  #diffSel { background: #0c1730; color: #fff; border: 2px solid #2a3a5c; padding: 8px; font-size: 9px; outline: none; }
+  #diffSel, #mapSel { background: #0c1730; color: #fff; border: 2px solid #2a3a5c; padding: 8px; font-size: 9px; outline: none; }
   .bmid { display: flex; flex-direction: column; align-items: center; gap: 8px; }
   .playbtn { min-width: 210px; padding: 16px 40px; font-size: 18px; letter-spacing: 2px; color: #fff; cursor: pointer;
     background: #ff4655; border: none; box-shadow: 0 0 0 3px #000, 0 6px 0 #8f1f2a; text-shadow: 2px 2px 0 #7a1a24; }
@@ -323,6 +323,12 @@
             <option value="easy">BOTS: EASY</option>
             <option value="normal" selected>BOTS: NORMAL</option>
             <option value="hard">BOTS: HARD</option>
+          </select>
+          <select id="mapSel" title="Map">
+            <option value="desert" selected>MAP: DESERT</option>
+            <option value="arctic">MAP: ARCTIC</option>
+            <option value="volcano">MAP: VOLCANO</option>
+            <option value="night">MAP: NIGHT</option>
           </select>
         </label>
       </div>
