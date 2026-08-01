@@ -113,6 +113,8 @@ const CFG = {
   botTeamTarget: 3,        // desired combatants (players+bots) per team
   botCap: 6,               // max bots per room
   botNames: ['Ozan', 'Deniz', 'Kaya', 'Ares', 'Bora', 'Cem', 'Efe', 'Mert', 'Rux', 'Zane', 'Nova', 'Kartal'],
+  regenDelay: 5000,        // ms without taking damage before health regenerates
+  regenRate: 14,           // HP restored per second while regenerating
 };
 const WEAPON = { rifle: { dmg: 16, rate: 220, range: 22 } };
 
@@ -190,7 +192,7 @@ export class GameServer extends DurableObject {
     const team = this.pickTeam(r);
     const name = String(m.name || 'Player').slice(0, 16) || 'Player';
     const pos = spawnFor(team);
-    const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0 };
+    const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, lastHit: 0 };
     r.clients.set(id, { ws, player });
 
     this.send(ws, {
@@ -262,6 +264,7 @@ export class GameServer extends DurableObject {
   applyDamage(r, tgt, dmg, attacker, head) {
     if (r.over) return;
     tgt.hp -= dmg;
+    tgt.lastHit = Date.now(); // resets the regen delay
     if (tgt.hp > 0) {
       if (!tgt.bot) { const c = r.clients.get(tgt.id); if (c) this.send(c.ws, { t: 'hp', hp: tgt.hp }); }
       return;
@@ -307,9 +310,10 @@ export class GameServer extends DurableObject {
   // ============================================================
   balanceBots(r) {
     if (!CFG.bots) return;
-    // Bots exist only to keep solo play fun. Once a second real player joins,
-    // remove every bot so it's a pure human match.
-    if (r.clients.size !== 1) { for (const b of [...r.bots.keys()]) this.removeBot(r, b); return; }
+    if (r.clients.size === 0) { for (const b of [...r.bots.keys()]) this.removeBot(r, b); return; }
+    // Fill each team up to the target combatant count. Humans count toward the
+    // target, so every human who joins quietly frees exactly one bot slot on
+    // their side — the rest of the bots stay in the match.
     for (const team of ['red', 'blue']) {
       let need = CFG.botTeamTarget - this.teamCount(r, team);
       while (need > 0 && r.bots.size < CFG.botCap) { this.addBot(r, team); need--; }
@@ -330,7 +334,7 @@ export class GameServer extends DurableObject {
     if (free.length) nm = free[Math.floor(Math.random() * free.length)];
     else { let i = 2; do { nm = CFG.botNames[Math.floor(Math.random() * CFG.botNames.length)] + ' ' + i++; } while (used.has(nm)); }
     const pos = spawnFor(team);
-    const bot = { id, name: nm, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, bot: true, nextShot: 0, wander: Math.random() * Math.PI * 2, repick: 0, respawnAt: 0 };
+    const bot = { id, name: nm, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, bot: true, nextShot: 0, wander: Math.random() * Math.PI * 2, repick: 0, respawnAt: 0, skill: 0.72 + Math.random() * 0.56, lastHit: 0 };
     r.bots.set(id, bot);
     this.broadcast(r, { t: 'join', p: this.pub(bot) });
   }
@@ -358,11 +362,11 @@ export class GameServer extends DurableObject {
         const w = WEAPON.rifle;
         if (best < w.range && now >= bot.nextShot &&
             losClear(bot.pos.x, bot.pos.y + 1.5, bot.pos.z, target.pos.x, target.pos.y + 1.0, target.pos.z)) {
-          bot.nextShot = now + w.rate + Math.random() * 260;
+          bot.nextShot = now + w.rate / bot.skill + Math.random() * 260;
           const dir = { x: -Math.sin(ang), y: 0.02, z: -Math.cos(ang) };
           const from = { x: bot.pos.x, y: bot.pos.y + 1.5, z: bot.pos.z };
           this.broadcast(r, { t: 'shoot', id: bot.id, from, dir, w: 'rifle' });
-          const acc = Math.max(0.12, 0.62 - best * 0.012);
+          const acc = Math.max(0.1, Math.min(0.9, (0.6 - best * 0.012) * bot.skill));
           if (Math.random() < acc) {
             const head = Math.random() < 0.12;
             this.applyDamage(r, target, Math.round(w.dmg * (head ? 2 : 1)), bot, head);
@@ -376,15 +380,25 @@ export class GameServer extends DurableObject {
     }
   }
 
-  // move a bot in heading `ang` with simple ground-follow + wall avoidance
+  // Move a bot toward heading `ang`, following the ground and sliding around
+  // walls: if the straight path is blocked, try progressively wider left/right
+  // deflections so the bot rounds obstacles instead of grinding into them.
   stepBot(r, bot, ang, dt) {
-    const speed = 5.0;
-    const fx = -Math.sin(ang), fz = -Math.cos(ang);
-    const nx = clampArena(bot.pos.x + fx * speed * dt);
-    const nz = clampArena(bot.pos.z + fz * speed * dt);
-    const destFeet = groundTop(nx, nz) + 1;
-    if (destFeet - bot.pos.y > 1.25) { bot.repick = 0; return; } // wall too tall — bail, repick heading
-    bot.pos.x = nx; bot.pos.z = nz; bot.pos.y = destFeet;
+    const step = 5.0 * dt;
+    for (const off of [0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6, 2.4, -2.4]) {
+      const a = ang + off;
+      const nx = clampArena(bot.pos.x - Math.sin(a) * step);
+      const nz = clampArena(bot.pos.z - Math.cos(a) * step);
+      if (nx === bot.pos.x && nz === bot.pos.z) continue; // clamped at arena edge
+      const destFeet = groundTop(nx, nz) + 1;
+      if (destFeet - bot.pos.y > 1.25) continue;          // wall too tall this way
+      if (bot.pos.y - destFeet > 4) continue;             // don't walk off big drops
+      bot.pos.x = nx; bot.pos.z = nz; bot.pos.y = destFeet;
+      if (off !== 0) bot.ry = a;                          // face the way we actually moved
+      return true;
+    }
+    bot.repick = 0; // fully boxed in — pick a new heading next wander
+    return false;
   }
 
   ensureTick() {
@@ -405,8 +419,16 @@ export class GameServer extends DurableObject {
             this.broadcast(r, { t: 'respawn', id: p.id, pos: p.pos });
           }
         }
+        // Passive health regeneration once an entity has avoided damage a while.
+        if (!r.over) for (const e of this.entities(r)) {
+          if (!e.alive || e.hp >= 100 || now - (e.lastHit || 0) < CFG.regenDelay) continue;
+          const was = Math.round(e.hp);
+          e.hp = Math.min(100, e.hp + CFG.regenRate * dt);
+          const nowHp = Math.round(e.hp);
+          if (!e.bot && nowHp !== was) { const c = r.clients.get(e.id); if (c) this.send(c.ws, { t: 'heal', hp: nowHp }); }
+        }
         const states = [];
-        for (const e of this.entities(r)) { if (!e.alive) continue; states.push({ id: e.id, pos: e.pos, ry: e.ry, rx: e.rx, anim: e.anim, hp: e.hp }); }
+        for (const e of this.entities(r)) { if (!e.alive) continue; states.push({ id: e.id, pos: e.pos, ry: e.ry, rx: e.rx, anim: e.anim, hp: Math.round(e.hp) }); }
         if (states.length) this.broadcast(r, { t: 'states', states });
       }
     }, CFG.tick);

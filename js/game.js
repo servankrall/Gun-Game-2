@@ -275,6 +275,10 @@ function handleMsg(m) {
       v.style.opacity = 1; setTimeout(() => v.style.opacity = 0, 120);
       break;
     }
+    case 'heal': {
+      if (!me.dead) { me.hp = m.hp; updateHearts(); } // passive regen — no hurt fx
+      break;
+    }
     case 'hitconfirm': {
       const hm = $('hitmarker');
       hm.classList.toggle('head', m.head);
