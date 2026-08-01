@@ -126,6 +126,16 @@
   #scoreTop .red { color: #ff5555; font-size: 18px; text-shadow: 2px 2px 0 #000; }
   #scoreTop .blue { color: #7f9fff; font-size: 18px; text-shadow: 2px 2px 0 #000; }
   #scoreTop .vs { color: #ccc; font-size: 10px; }
+  #ggHud {
+    display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    text-align: center; background: rgba(0,0,0,.45); padding: 7px 18px 9px; border: 2px solid #000;
+  }
+  #ggHud .lvl { color: #ffd24a; font-size: 10px; letter-spacing: 1px; text-shadow: 2px 2px 0 #000; }
+  #ggHud .pips { display: flex; gap: 4px; justify-content: center; margin: 5px 0 4px; }
+  #ggHud .pips i { width: 10px; height: 10px; background: rgba(255,255,255,.16); border: 1px solid #000; }
+  #ggHud .pips i.done { background: #49c26a; }
+  #ggHud .pips i.now { background: #7dd3fc; box-shadow: 0 0 6px #7dd3fc; }
+  #ggHud .wpn { color: #fff; font-size: 13px; text-shadow: 2px 2px 0 #000; }
 
   #killfeed { position: absolute; top: 12px; right: 12px; text-align: right; }
   #killfeed div { font-size: 9px; color: #fff; background: rgba(0,0,0,.5); padding: 5px 8px; margin-bottom: 4px; text-shadow: 1px 1px 0 #000; }
@@ -337,6 +347,7 @@
         <div id="modeRow">
           <span class="mode active" data-mode="dm">DEATHMATCH</span>
           <span class="mode" data-mode="ctf">CAPTURE THE FLAG</span>
+          <span class="mode" data-mode="gg">GUN GAME</span>
         </div>
       </div>
       <div class="bside right">
@@ -372,6 +383,7 @@
       <span class="vs">RED vs BLUE</span>
       <span class="blue" id="scoreBlue">0</span>
     </div>
+    <div id="ggHud"></div>
     <canvas id="minimap" width="116" height="116"></canvas>
     <div id="playerCount">◉ 0</div>
     <div id="announce"></div>

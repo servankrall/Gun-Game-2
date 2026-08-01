@@ -22,6 +22,9 @@ const WEAPONS = {
   bazooka: { name: 'BAZOOKA',   dmg: 110, rate: 2000, mag: 1, reload: 3200, spread: 0, auto: false, pellets: 1, range: 120, rocket: true },
 };
 const SLOTS = ['rifle', 'smg', 'shotgun', 'sniper', 'lmg', 'pistol', 'blocks', 'pickaxe', 'bazooka'];
+// Gun Game weapon ladder — must match the server. Each kill promotes you one
+// rung; the final rung is the pickaxe (a one-hit melee finisher).
+const GG_LADDER = ['pistol', 'smg', 'rifle', 'shotgun', 'lmg', 'sniper', 'bazooka', 'pickaxe'];
 const TEAM_RU = { red: 'RED', blue: 'BLUE' };
 const TEAM_COL = { red: '#ff5555', blue: '#7f9fff' };
 
@@ -69,8 +72,9 @@ const mobileMove = { x: 0, z: 0, active: false };
 let myRoom = (new URLSearchParams(location.search).get('room') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
 let scoreLimit = 150;
 let botDiff = 'normal';
-let gameMode = 'dm';   // 'dm' (deathmatch) | 'ctf' (capture the flag)
+let gameMode = 'dm';   // 'dm' (deathmatch) | 'ctf' (capture the flag) | 'gg' (gun game)
 let menuMode = 'dm';   // mode chosen on the menu, sent at join
+let myLevel = 0;       // gun-game rung (index into GG_LADDER)
 let sunLight = null, ambLight = null;
 let mapTheme = 'desert', menuMap = 'desert';
 // Map themes: same arena collision, different look (materials + sky/fog/light).
@@ -232,7 +236,7 @@ function setupMenu() {
   renderAgent();
 
   // game mode selection (Deathmatch / Capture the Flag)
-  menuMode = (localStorage.getItem('blockade_mode') === 'ctf') ? 'ctf' : 'dm';
+  { const sm = localStorage.getItem('blockade_mode'); menuMode = (sm === 'ctf' || sm === 'gg') ? sm : 'dm'; }
   const modes = document.querySelectorAll('#modeRow .mode');
   const syncModes = () => modes.forEach(el => el.classList.toggle('active', el.dataset.mode === menuMode));
   modes.forEach(el => el.addEventListener('click', () => { menuMode = el.dataset.mode; localStorage.setItem('blockade_mode', menuMode); syncModes(); }));
@@ -333,7 +337,10 @@ function handleMsg(m) {
       for (const d of m.destroyed || []) removeBlockLocal(d.x, d.y, d.z, true);
       for (const b of m.placed) placeBlockLocal(b.x, b.y, b.z, b.team);
       if (gameMode === 'ctf') { ensureFlags(); if (m.flags) updateFlagMeshes(m.flags); }
+      if (gameMode === 'gg') { myLevel = 0; }
       startGame();
+      setGunGameUI(gameMode === 'gg');
+      if (gameMode === 'gg') applyGunGameWeapon();
       initVoice();
       break;
     }
@@ -425,6 +432,22 @@ function handleMsg(m) {
       if (m.killer === myId && m.victim !== myId) { me.kills++; SND.kill(); onMyKill(); }
       break;
     }
+    case 'level': {
+      if (m.id === myId) {
+        myLevel = m.level;
+        if (m.demote) { announce('HUMILIATED!  −1 LEVEL', '#ff5555'); SND.hurt(); }
+        else if (m.up && myLevel < GG_LADDER.length) {
+          announce('LEVEL UP!  ► ' + (WEAPONS[ggWeaponKey()]?.name || ''), '#7dd3fc'); SND.spawn();
+        }
+        me.reloading = false; $('reloadLbl').style.display = 'none';
+        const k = ggWeaponKey(); if (WEAPONS[k]?.mag) me.ammo[k] = WEAPONS[k].mag;
+        applyGunGameWeapon();
+      } else if (m.up) {
+        const r = remotes.get(m.id);
+        if (r) { r.level = m.level; if (m.level >= GG_LADDER.length - 1) feed(`${m.name} reached the final weapon!`, r.team); }
+      }
+      break;
+    }
     case 'respawn': {
       if (m.id === myId) {
         me.pos.set(m.pos.x, m.pos.y, m.pos.z);
@@ -434,6 +457,7 @@ function handleMsg(m) {
         me.blocks = AGENTS[myAgent]?.blocks || 64; me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.reloading = false;
         me.ry = myTeam === 'red' ? -Math.PI / 2 : Math.PI / 2; me.rx = 0;
         updateHearts(); updateAmmoHud(); updateHotbar();
+        if (gameMode === 'gg') applyGunGameWeapon();
         $('deathScreen').style.display = 'none';
         const f = $('respawnFlash');
         f.style.opacity = 0.8; f.style.transition = 'none';
@@ -475,7 +499,7 @@ function handleMsg(m) {
       updateCount(m.count);
       break;
     case 'matchover':
-      showMatchOver(m.winner, m.scores);
+      showMatchOver(m.winner, m.scores, m.winnerName);
       break;
     case 'matchstart':
       Object.assign(scores, m.scores);
@@ -484,7 +508,10 @@ function handleMsg(m) {
       killStreak = 0;
       hideMatchOver();
       resetWorld();
-      feed(gameMode === 'ctf' ? `New match — capture ${scoreLimit} flags to win!` : `New match — first to ${scoreLimit} kills wins!`, myTeam);
+      if (gameMode === 'gg') { myLevel = 0; applyGunGameWeapon(); }
+      feed(gameMode === 'ctf' ? `New match — capture ${scoreLimit} flags to win!`
+         : gameMode === 'gg' ? `New match — work through all ${scoreLimit} weapons to win!`
+         : `New match — first to ${scoreLimit} kills wins!`, myTeam);
       break;
   }
 }
@@ -495,9 +522,17 @@ function updateCount(n) {
   const el = $('playerCount');
   if (el) el.textContent = '◉ ' + n;
 }
-function showMatchOver(winner, sc) {
+function showMatchOver(winner, sc, winnerName) {
   if (sc) { Object.assign(scores, sc); $('scoreRed').textContent = scores.red; $('scoreBlue').textContent = scores.blue; }
   const o = $('matchOver');
+  if (gameMode === 'gg') {
+    const win = (winnerName && winnerName === myName);
+    $('matchOverTitle').textContent = (winnerName || 'SOMEONE') + ' WINS!';
+    $('matchOverTitle').style.color = win ? '#ffd24a' : (TEAM_COL[winner] || '#fff');
+    $('matchOverSub').textContent = (win ? 'You mastered every weapon! ' : 'Beaten to the last weapon. ') + 'Next match starting...';
+    o.style.display = 'flex';
+    return;
+  }
   const win = (winner === myTeam);
   $('matchOverTitle').textContent = (winner === 'red' ? 'RED' : 'BLUE') + ' TEAM WINS';
   $('matchOverTitle').style.color = TEAM_COL[winner] || '#fff';
@@ -984,7 +1019,7 @@ function tryShoot(now) {
   const w = WEAPONS[wkey];
   if (me.dead || me.reloading) return;
   if (w.builder) { tryPlaceBlock(); return; }
-  if (w.tool) { tryBreakBlock(); return; }
+  if (w.tool) { if (gameMode === 'gg') tryMelee(now); else tryBreakBlock(); return; }
   if (now - me.lastShot < w.rate) return;
   if (me.ammo[wkey] <= 0) { startReload(); return; }
   me.lastShot = now;
@@ -1040,6 +1075,32 @@ function tryShoot(now) {
   me.rx += w.pellets > 1 ? 0.03 : (wkey === 'sniper' ? 0.04 : 0.012);
   vm.recoil = 1;
   if (me.ammo[wkey] <= 0) startReload();
+}
+
+// Pickaxe melee (Gun Game finisher): a short-range one-hit swing that also
+// demotes the victim a rung server-side. Never mines blocks in this mode.
+function tryMelee(now) {
+  if (me.dead || now - me.lastShot < 420) return;
+  me.lastShot = now;
+  const origin = camera.getWorldPosition(new THREE.Vector3());
+  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+  const RANGE = 3.4;
+  let bestPlayer = null, bestT = RANGE;
+  for (const r of remotes.values()) {
+    if (!r.alive || r.team === myTeam) continue;
+    const bp = r.group.position;
+    const t = rayAABB(origin, dir, { x: bp.x - 0.55, y: bp.y, z: bp.z - 0.55 }, { x: bp.x + 0.55, y: bp.y + 1.95, z: bp.z + 0.55 });
+    if (t !== null && t < bestT) { bestT = t; bestPlayer = r; }
+  }
+  if (bestPlayer) {
+    netSend({ t: 'hit', target: bestPlayer.id, dmg: 200, w: 'pickaxe', head: false });
+    bloodBurst(new THREE.Vector3(origin.x + dir.x * bestT, origin.y + dir.y * bestT, origin.z + dir.z * bestT));
+    SND.hit();
+  } else {
+    SND.swing();
+  }
+  me.rx += 0.02;
+  vm.recoil = 1;
 }
 
 function startReload() {
@@ -1473,12 +1534,40 @@ function updateViewModel(dt, moving) {
 }
 
 function selectSlot(i) {
+  if (gameMode === 'gg') return;   // gun game forces your weapon by rung
   if (i >= SLOTS.length || i === me.slot) return;
   me.slot = i;
   me.zoomed = false;
   for (const [k, m] of Object.entries(vm.models)) m.visible = (k === SLOTS[i]);
   updateHotbar(); updateAmmoHud();
   tone(420, 0.04, 0.08, 'square');
+}
+
+// ---- Gun Game helpers ----
+function ggWeaponKey() { return GG_LADDER[Math.min(myLevel, GG_LADDER.length - 1)]; }
+function applyGunGameWeapon() {
+  if (gameMode !== 'gg') return;
+  const i = SLOTS.indexOf(ggWeaponKey());
+  if (i >= 0) {
+    me.slot = i;
+    me.zoomed = false;
+    if (vm && vm.models) for (const [k, mo] of Object.entries(vm.models)) mo.visible = (k === SLOTS[i]);
+  }
+  updateHotbar(); updateAmmoHud(); updateGGHud();
+}
+function setGunGameUI(on) {
+  const st = $('scoreTop'); if (st) st.style.display = on ? 'none' : '';
+  const gg = $('ggHud'); if (gg) gg.style.display = on ? 'block' : 'none';
+  if (on) updateGGHud();
+}
+function updateGGHud() {
+  const el = $('ggHud'); if (!el || gameMode !== 'gg') return;
+  const total = GG_LADDER.length;
+  const cur = Math.min(myLevel, total - 1);
+  const pips = GG_LADDER.map((_, i) => `<i class="${i < myLevel ? 'done' : i === cur ? 'now' : ''}"></i>`).join('');
+  el.innerHTML = `<div class="lvl">GUN GAME · WEAPON ${Math.min(myLevel + 1, total)}/${total}</div>`
+    + `<div class="pips">${pips}</div>`
+    + `<div class="wpn">${WEAPONS[ggWeaponKey()]?.name || ''}</div>`;
 }
 
 // ============================================================

@@ -128,6 +128,10 @@ const CFG = {
   flagReturn: 30000,       // ms a dropped flag waits before auto-returning home
 };
 const WEAPON = { rifle: { dmg: 16, rate: 220, range: 22 } };
+// Gun Game weapon ladder: every kill promotes the killer one rung, and the
+// first player to score a kill with the final rung wins. The last rung is the
+// pickaxe — the classic melee "humiliation" finisher. Must match the client.
+const GG_LADDER = ['pistol', 'smg', 'rifle', 'shotgun', 'lmg', 'sniper', 'bazooka', 'pickaxe'];
 // Per-difficulty bot skill range (skill scales fire rate + accuracy).
 const SKILL = {
   easy:   { min: 0.40, span: 0.35 },
@@ -230,19 +234,20 @@ export class GameServer extends DurableObject {
     const name = String(m.name || 'Player').slice(0, 16) || 'Player';
     const pos = spawnFor(team);
     const agent = agentOf(m.agent);
-    const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, lastHit: 0,
+    const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, lastHit: 0, level: 0,
       agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.clients.set(id, { ws, player });
     // First player in a room sets the bot difficulty AND the game mode for it.
     if (r.clients.size === 1) {
       if (['easy', 'normal', 'hard'].includes(m.diff)) r.diff = m.diff;
       if (m.mode === 'ctf') { r.mode = 'ctf'; r.flags = makeFlags(); }
+      else if (m.mode === 'gg') { r.mode = 'gg'; }
       if (['desert', 'arctic', 'volcano', 'night'].includes(m.map)) r.map = m.map;
     }
 
     this.send(ws, {
       t: 'welcome', id, team, pos, ry: player.ry, scores: r.scores, room: roomId, count: this.count(r),
-      mode: r.mode, map: r.map, limit: r.mode === 'ctf' ? CFG.captureLimit : CFG.scoreLimit,
+      mode: r.mode, map: r.map, limit: r.mode === 'ctf' ? CFG.captureLimit : r.mode === 'gg' ? GG_LADDER.length : CFG.scoreLimit,
       flags: r.flags ? this.flagPub(r) : undefined,
       players: this.entities(r).filter(e => e.id !== id).map(e => this.pub(e)),
       placed: [...r.placed.values()], destroyed: [...r.destroyed.values()],
@@ -269,7 +274,7 @@ export class GameServer extends DurableObject {
       case 'hit': {
         const tgt = this.find(r, m.target);
         if (!tgt || !tgt.alive || tgt.team === p.team) break;
-        this.applyDamage(r, tgt, Math.max(0, Math.min(300, m.dmg | 0)), p, !!m.head);
+        this.applyDamage(r, tgt, Math.max(0, Math.min(300, m.dmg | 0)), p, !!m.head, m.w);
         this.send(c.ws, { t: 'hitconfirm', head: !!m.head });
         break;
       }
@@ -312,7 +317,7 @@ export class GameServer extends DurableObject {
 
   find(r, id) { const c = r.clients.get(id); if (c) return c.player; return r.bots.get(id) || null; }
 
-  applyDamage(r, tgt, dmg, attacker, head) {
+  applyDamage(r, tgt, dmg, attacker, head, weapon) {
     if (r.over) return;
     dmg = Math.max(1, Math.round(dmg * (tgt.dmgTakenMult || 1))); // agent damage-taken perk
     tgt.hp -= dmg;
@@ -334,11 +339,29 @@ export class GameServer extends DurableObject {
     }
     tgt.respawnAt = Date.now() + (tgt.bot ? 3000 : 3500); // auto-respawn (client never asks)
     if (r.mode === 'ctf' && r.flags) this.dropFlagIfCarrier(r, tgt); // drop the flag where they fell
-    // In Deathmatch kills score; in CTF only captures score.
-    if (r.mode !== 'ctf' && attacker) r.scores[attacker.team] = (r.scores[attacker.team] || 0) + 1;
+    // Deathmatch kills score for the team; CTF scores only on captures; Gun Game
+    // tracks individual weapon-ladder progress instead of team score.
+    if (r.mode === 'dm' && attacker) r.scores[attacker.team] = (r.scores[attacker.team] || 0) + 1;
     this.broadcast(r, { t: 'death', victim: tgt.id, killer: attacker ? attacker.id : tgt.id, head });
     this.broadcast(r, { t: 'scores', scores: r.scores });
-    if (r.mode !== 'ctf' && attacker && r.scores[attacker.team] >= CFG.scoreLimit) this.endMatch(r, attacker.team);
+    if (r.mode === 'gg') this.ggProgress(r, attacker, tgt, weapon);
+    if (r.mode === 'dm' && attacker && r.scores[attacker.team] >= CFG.scoreLimit) this.endMatch(r, attacker.team);
+  }
+
+  // Gun Game: advance the killer up the weapon ladder (refilling their health),
+  // and knock the victim down a rung on a melee/pickaxe kill (the humiliation).
+  ggProgress(r, attacker, victim, weapon) {
+    if (weapon === 'pickaxe' && victim && (victim.level || 0) > 0) {
+      victim.level--;
+      this.broadcast(r, { t: 'level', id: victim.id, level: victim.level, name: victim.name, demote: true });
+    }
+    if (!attacker) return;
+    attacker.level = (attacker.level || 0) + 1;
+    attacker.hp = 100; attacker.lastHit = 0; // fresh health on promotion
+    if (!attacker.bot) { const c = r.clients.get(attacker.id); if (c) this.send(c.ws, { t: 'heal', hp: 100 }); }
+    const won = attacker.level >= GG_LADDER.length;
+    this.broadcast(r, { t: 'level', id: attacker.id, level: Math.min(attacker.level, GG_LADDER.length), name: attacker.name, up: true });
+    if (won) this.endMatch(r, attacker.team, attacker.name);
   }
 
   flagPub(r) {
@@ -390,9 +413,9 @@ export class GameServer extends DurableObject {
     }
   }
 
-  endMatch(r, winner) {
+  endMatch(r, winner, winnerName) {
     r.over = true;
-    this.broadcast(r, { t: 'matchover', winner, scores: r.scores });
+    this.broadcast(r, { t: 'matchover', winner, winnerName: winnerName || null, scores: r.scores });
     setTimeout(() => this.resetMatch(r), 6000);
   }
   resetMatch(r) {
@@ -401,8 +424,8 @@ export class GameServer extends DurableObject {
     r.scores = { red: 0, blue: 0 };
     r.placed.clear(); r.destroyed.clear();
     if (r.mode === 'ctf') r.flags = makeFlags();
-    for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.pos = spawnFor(p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
-    for (const b of r.bots.values()) { b.hp = 100; b.alive = true; b.kills = 0; b.deaths = 0; b.pos = spawnFor(b.team); b.ry = ryFor(b.team); this.broadcast(r, { t: 'respawn', id: b.id, pos: b.pos }); }
+    for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.level = 0; p.pos = spawnFor(p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
+    for (const b of r.bots.values()) { b.hp = 100; b.alive = true; b.kills = 0; b.deaths = 0; b.level = 0; b.pos = spawnFor(b.team); b.ry = ryFor(b.team); this.broadcast(r, { t: 'respawn', id: b.id, pos: b.pos }); }
     this.broadcast(r, { t: 'scores', scores: r.scores });
     this.broadcast(r, { t: 'matchstart', scores: r.scores });
   }
@@ -450,7 +473,7 @@ export class GameServer extends DurableObject {
     const pos = spawnFor(team);
     const skill = SKILL[r.diff] || SKILL.normal;
     const agent = Object.keys(AGENTS)[Math.floor(Math.random() * Object.keys(AGENTS).length)];
-    const bot = { id, name: nm, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, bot: true, nextShot: 0, wander: Math.random() * Math.PI * 2, repick: 0, respawnAt: 0, skill: skill.min + Math.random() * skill.span, lastHit: 0, agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
+    const bot = { id, name: nm, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, level: 0, bot: true, nextShot: 0, wander: Math.random() * Math.PI * 2, repick: 0, respawnAt: 0, skill: skill.min + Math.random() * skill.span, lastHit: 0, agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.bots.set(id, bot);
     this.broadcast(r, { t: 'join', p: this.pub(bot) });
   }
