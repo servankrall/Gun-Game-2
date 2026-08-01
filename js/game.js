@@ -12,13 +12,16 @@ const SENS = 0.0023;
 
 const WEAPONS = {
   rifle:   { name: 'RIFLE',  dmg: 18, rate: 110,  mag: 30, reload: 1800, spread: 0.014, auto: true,  pellets: 1, range: 90 },
+  smg:     { name: 'SMG',    dmg: 12, rate: 72,   mag: 28, reload: 1500, spread: 0.03,  auto: true,  pellets: 1, range: 52 },
   shotgun: { name: 'SHOTGUN', dmg: 9,  rate: 850,  mag: 6,  reload: 2200, spread: 0.06,  auto: false, pellets: 8, range: 32 },
   sniper:  { name: 'SNIPER', dmg: 70, rate: 1400, mag: 5,  reload: 2400, spread: 0.002, auto: false, pellets: 1, range: 140 },
+  lmg:     { name: 'LMG',    dmg: 16, rate: 95,   mag: 60, reload: 3200, spread: 0.045, auto: true,  pellets: 1, range: 78 },
+  pistol:  { name: 'PISTOL', dmg: 26, rate: 250,  mag: 12, reload: 1100, spread: 0.02,  auto: false, pellets: 1, range: 60 },
   blocks:  { name: 'BLOCKS',    builder: true },
   pickaxe: { name: 'PICKAXE',    tool: true, auto: true },
   bazooka: { name: 'BAZOOKA',   dmg: 110, rate: 2000, mag: 1, reload: 3200, spread: 0, auto: false, pellets: 1, range: 120, rocket: true },
 };
-const SLOTS = ['rifle', 'shotgun', 'sniper', 'blocks', 'pickaxe', 'bazooka'];
+const SLOTS = ['rifle', 'smg', 'shotgun', 'sniper', 'lmg', 'pistol', 'blocks', 'pickaxe', 'bazooka'];
 const TEAM_RU = { red: 'RED', blue: 'BLUE' };
 const TEAM_COL = { red: '#ff5555', blue: '#7f9fff' };
 
@@ -42,7 +45,7 @@ const me = {
   hp: 100, dead: false,
   kills: 0, deaths: 0,
   slot: 0,
-  ammo: { rifle: 30, shotgun: 6, sniper: 5, bazooka: 1 },
+  ammo: { rifle: 30, smg: 28, shotgun: 6, sniper: 5, lmg: 60, pistol: 12, bazooka: 1 },
   blocks: 64,
   nades: 3,
   reloading: false, reloadEnd: 0,
@@ -398,7 +401,7 @@ function handleMsg(m) {
         me.pos.set(m.pos.x, m.pos.y, m.pos.z);
         me.vel.set(0, 0, 0);
         me.hp = 100; me.dead = false;
-        me.ammo = { rifle: 30, shotgun: 6, sniper: 5, bazooka: 1 };
+        me.ammo = { rifle: 30, smg: 28, shotgun: 6, sniper: 5, lmg: 60, pistol: 12, bazooka: 1 };
         me.blocks = AGENTS[myAgent]?.blocks || 64; me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.reloading = false;
         me.ry = myTeam === 'red' ? -Math.PI / 2 : Math.PI / 2; me.rx = 0;
         updateHearts(); updateAmmoHud(); updateHotbar();
@@ -1347,6 +1350,41 @@ function buildViewModels() {
     g.add(body, barrel, scope, stock);
     vm.models.sniper = g;
   }
+  // smg
+  {
+    const g = gunBase();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.09, 0.34), dark);
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.16), dark2);
+    barrel.position.set(0, 0.01, -0.26);
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.16, 0.06), dark2);
+    mag.position.set(0, -0.13, 0.02);
+    g.add(body, barrel, mag);
+    vm.models.smg = g;
+  }
+  // lmg
+  {
+    const g = gunBase();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.55), dark);
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.34), dark2);
+    barrel.position.set(0, 0.02, -0.42);
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.13, 0.16), dark2);
+    box.position.set(0, -0.12, 0.05);
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.09, 0.16), dark);
+    stock.position.set(0, -0.01, 0.33);
+    g.add(body, barrel, box, stock);
+    vm.models.lmg = g;
+  }
+  // pistol
+  {
+    const g = gunBase();
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.075, 0.2), dark);
+    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.08), dark2);
+    barrel.position.set(0, 0.02, -0.14);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.06), dark2);
+    grip.position.set(0, -0.1, 0.05);
+    g.add(body, barrel, grip);
+    vm.models.pistol = g;
+  }
   // block in hand
   {
     const g = new THREE.Group();
@@ -1502,6 +1540,20 @@ function drawIcon(kind) {
     g.fillStyle = '#444'; g.fillRect(8, 11, 8, 4);
     g.fillStyle = '#6e4f2a'; g.fillRect(2, 15, 5, 7);
     g.fillStyle = '#555'; g.fillRect(12, 19, 3, 5);
+  } else if (kind === 'smg') {
+    g.fillRect(4, 14, 16, 5);
+    g.fillStyle = '#444'; g.fillRect(18, 15, 6, 3);
+    g.fillStyle = '#444'; g.fillRect(9, 19, 4, 8);
+    g.fillStyle = '#555'; g.fillRect(5, 12, 5, 3);
+  } else if (kind === 'lmg') {
+    g.fillRect(2, 13, 26, 6);
+    g.fillStyle = '#444'; g.fillRect(11, 19, 6, 9);
+    g.fillStyle = '#555'; g.fillRect(24, 11, 6, 4);
+    g.fillStyle = '#777'; g.fillRect(6, 19, 3, 8); g.fillRect(19, 19, 3, 8);
+  } else if (kind === 'pistol') {
+    g.fillRect(8, 12, 16, 4);
+    g.fillStyle = '#444'; g.fillRect(9, 15, 6, 9);
+    g.fillStyle = '#555'; g.fillRect(22, 13, 3, 3);
   }
   return c.toDataURL();
 }
