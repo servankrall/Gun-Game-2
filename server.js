@@ -195,6 +195,49 @@ export class GameServer extends DurableObject {
     return out;
   }
 
+  // ---- accounts (persisted in DO storage online; in-memory in the offline build) ----
+  async _get(k) { if (this.ctx?.storage) return await this.ctx.storage.get(k); this._mem ||= new Map(); return this._mem.get(k); }
+  async _put(k, v) { if (this.ctx?.storage) return await this.ctx.storage.put(k, v); this._mem ||= new Map(); this._mem.set(k, v); }
+  randHex(n) { const a = new Uint8Array(n); crypto.getRandomValues(a); return [...a].map(b => b.toString(16).padStart(2, '0')).join(''); }
+  async hashPass(pass, salt) {
+    const msg = salt + ':' + pass;
+    if (crypto?.subtle) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(msg));
+      return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    let h = 5381; for (let i = 0; i < msg.length; i++) h = ((h << 5) + h + msg.charCodeAt(i)) | 0; // fallback (non-secure ctx)
+    return 'x' + (h >>> 0).toString(16);
+  }
+  profileOf(a) { return { coins: a.coins || 0, unlocked: a.unlocked || ['soldier'], friends: a.friends || [] }; }
+  async register(user, pass) {
+    user = String(user || '').trim().toLowerCase().slice(0, 16);
+    if (!/^[a-z0-9_]{3,16}$/.test(user)) return { ok: false, error: 'Username: 3-16 letters/numbers/_' };
+    if (String(pass || '').length < 4) return { ok: false, error: 'Password too short (min 4)' };
+    if (await this._get('acct:' + user)) return { ok: false, error: 'Username taken' };
+    const salt = this.randHex(8);
+    const acct = { user, salt, hash: await this.hashPass(pass, salt), coins: 0, unlocked: ['soldier'], friends: [] };
+    await this._put('acct:' + user, acct);
+    const token = this.randHex(16); await this._put('tok:' + token, user);
+    return { ok: true, user, token, profile: this.profileOf(acct) };
+  }
+  async login(user, pass) {
+    user = String(user || '').trim().toLowerCase().slice(0, 16);
+    const acct = await this._get('acct:' + user);
+    if (!acct) return { ok: false, error: 'No such account' };
+    if (await this.hashPass(pass, acct.salt) !== acct.hash) return { ok: false, error: 'Wrong password' };
+    const token = this.randHex(16); await this._put('tok:' + token, user);
+    return { ok: true, user, token, profile: this.profileOf(acct) };
+  }
+  async byToken(token) { const user = await this._get('tok:' + String(token || '')); if (!user) return null; return (await this._get('acct:' + user)) || null; }
+  async saveProfile(token, coins, unlocked, friends) {
+    const user = await this._get('tok:' + String(token || '')); if (!user) return;
+    const acct = await this._get('acct:' + user); if (!acct) return;
+    if (Number.isFinite(coins)) acct.coins = Math.max(0, Math.min(1e9, coins | 0));
+    if (Array.isArray(unlocked)) acct.unlocked = unlocked.slice(0, 60).map(String);
+    if (Array.isArray(friends)) acct.friends = friends.slice(0, 200);
+    await this._put('acct:' + user, acct);
+  }
+
   room(id) {
     let r = this.rooms.get(id);
     if (!r) {
@@ -227,6 +270,20 @@ export class GameServer extends DurableObject {
         this.send(ws, { t: 'presence', online: this.presenceQuery((Array.isArray(m.pids) ? m.pids : []).slice(0, 50)) });
         return;
       }
+      if (m.t === 'register' || m.t === 'login') {
+        (m.t === 'register' ? this.register(m.user, m.pass) : this.login(m.user, m.pass))
+          .then(res => { if (res.ok) pid = res.user; this.send(ws, { t: 'auth', ...res }); })
+          .catch(() => this.send(ws, { t: 'auth', ok: false, error: 'server error' }));
+        return;
+      }
+      if (m.t === 'auth_token') {
+        this.byToken(m.token).then(acct => {
+          if (acct) { pid = acct.user; this.send(ws, { t: 'auth', ok: true, user: acct.user, token: m.token, profile: this.profileOf(acct) }); }
+          else this.send(ws, { t: 'auth', ok: false, error: 'session expired' });
+        }).catch(() => {});
+        return;
+      }
+      if (m.t === 'acct_save') { this.saveProfile(m.token, m.coins, m.unlocked, m.friends); return; }
       if (m.t === 'join') {
         if (id !== null) return;
         roomId = String(m.room || 'pub').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'pub';

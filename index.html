@@ -91,6 +91,17 @@
   #optPanel .optrow { display: flex; align-items: center; gap: 10px; color: #cfd6e6; font-size: 9px; }
   #optPanel .optrow input[type=range] { width: 240px; }
   #optPanel .opthint { color: #8090ad; font-size: 8px; line-height: 1.9; text-align: center; }
+  #authPanel { display: none; flex-direction: column; gap: 8px; width: min(420px, 92vw); margin: 8px auto 0;
+    background: rgba(6,14,30,.72); border: 2px solid #2a3a5c; padding: 12px; }
+  #authPanel.open { display: flex; }
+  #authPanel .authbox { display: flex; flex-direction: column; gap: 8px; }
+  #authPanel .atitle { color: #cfd6e6; font-size: 9px; letter-spacing: 1px; text-align: center; }
+  #authPanel .atitle .asub { color: #8090ad; font-size: 7px; display: block; margin-top: 3px; letter-spacing: 0; }
+  #authPanel input { background: #0c1730; color: #fff; border: 2px solid #2a3a5c; padding: 8px; font-family: inherit; font-size: 9px; outline: none; }
+  #authPanel .arow { display: flex; gap: 6px; }
+  #authPanel .arow button, #authPanel #logoutBtn { flex: 1; background: #e9c65a; color: #2a1c00; border: 2px solid #000; font-family: inherit; font-size: 9px; padding: 8px; cursor: pointer; }
+  #authPanel .amsg { color: #ff9a9a; font-size: 8px; text-align: center; min-height: 10px; }
+  #authPanel #authWho { color: #ffd24a; }
   #friendsPanel { display: none; flex-direction: column; gap: 8px; width: min(420px, 92vw); margin: 8px auto 0;
     background: rgba(6,14,30,.72); border: 2px solid #2a3a5c; padding: 12px; }
   #friendsPanel.open { display: flex; }
@@ -378,10 +389,25 @@
       <div class="bside right">
         <button id="inviteBtn" class="linkbtn">⧉ INVITE FRIENDS</button>
         <button id="friendsBtn" class="linkbtn">👥 FRIENDS</button>
+        <button id="authBtn" class="linkbtn">👤 ACCOUNT</button>
       </div>
     </div>
 
     <div class="err" id="menuErr"></div>
+
+    <div id="authPanel">
+      <div id="authLoggedOut" class="authbox">
+        <div class="atitle">LOG IN / SIGN UP <span class="asub">(sync coins, classes &amp; friends across devices)</span></div>
+        <input id="authUser" maxlength="16" placeholder="Username" autocomplete="off">
+        <input id="authPass" type="password" maxlength="40" placeholder="Password" autocomplete="off">
+        <div class="arow"><button id="loginBtn">LOG IN</button><button id="registerBtn">SIGN UP</button></div>
+        <div id="authMsg" class="amsg"></div>
+      </div>
+      <div id="authLoggedIn" class="authbox">
+        <div>Logged in as <b id="authWho">—</b></div>
+        <button id="logoutBtn">LOG OUT</button>
+      </div>
+    </div>
 
     <div id="friendsPanel">
       <div class="fcode">YOUR CODE: <b id="myCode">------</b> <button id="copyCodeBtn" class="fcopy">COPY</button></div>
@@ -392,6 +418,8 @@
     <div id="optPanel">
       <div class="optrow"><span>LOOK SENS</span><input id="sensRange" type="range" min="0.4" max="2" step="0.05"><span id="sensVal">1.00x</span></div>
       <div class="optrow"><span>GRAPHICS</span><select id="gfxSel"><option value="high">HIGH</option><option value="low">LOW (faster)</option></select></div>
+      <div class="optrow"><span>FOV</span><input id="fovRange" type="range" min="60" max="100" step="1"><span id="fovVal">70</span></div>
+      <div class="optrow"><span>VOLUME</span><input id="volRange" type="range" min="0" max="1" step="0.05"><span id="volVal">80%</span></div>
       <div class="opthint">
         WASD move · LMB fire · RMB aim · 1-9 weapons · G grenade<br>
         SPACE jump · SHIFT sprint · TAB scoreboard · R reload · T chat · V voice

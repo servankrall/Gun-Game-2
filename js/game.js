@@ -134,15 +134,34 @@ let unlocked = (() => {
 })();
 unlocked.add('soldier'); // soldier is always free
 function isUnlocked(id) { return (AGENTS[id]?.cost || 0) === 0 || unlocked.has(id); }
-function saveCoins() { localStorage.setItem('bf_coins', String(coins)); }
-function saveUnlocked() { localStorage.setItem('bf_unlocked', JSON.stringify([...unlocked])); }
+// When logged in, coins/unlocks/friends live on the account (synced); as a guest
+// they persist to this device's localStorage.
+function saveCoins() { if (account) syncAccount(); else localStorage.setItem('bf_coins', String(coins)); }
+function saveUnlocked() { if (account) syncAccount(); else localStorage.setItem('bf_unlocked', JSON.stringify([...unlocked])); }
 function awardCoins(n) { coins += n; saveCoins(); const el = $('coinBal'); if (el) el.textContent = '🪙 ' + coins; }
 // ---- persistent identity + friends (friend code = your player id) ----
 let myPid = localStorage.getItem('bf_pid');
 if (!myPid) { myPid = Math.random().toString(36).slice(2, 8).toUpperCase(); localStorage.setItem('bf_pid', myPid); }
 let friends = (() => { try { const f = JSON.parse(localStorage.getItem('bf_friends')); return Array.isArray(f) ? f : []; } catch { return []; } })();
-function saveFriends() { localStorage.setItem('bf_friends', JSON.stringify(friends)); }
+function saveFriends() { if (account) syncAccount(); else localStorage.setItem('bf_friends', JSON.stringify(friends)); }
 let lobbyWs = null, lobbyTimer = null, presenceCache = {};
+let menuRefresh = null; // set by setupMenu so auth changes can refresh the menu view
+// ---- account (optional login; syncs coins/unlocks/friends across devices) ----
+let account = null; // { user, token } when logged in
+let authToken = localStorage.getItem('bf_token') || null;
+let syncTimer = null;
+function presenceId() { return account ? account.user : myPid; }
+// Push the current profile to the server (debounced) when logged in.
+function syncAccount() {
+  if (!account) return;
+  const payload = JSON.stringify({ t: 'acct_save', token: account.token, coins, unlocked: [...unlocked], friends });
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    if (ws && ws.readyState === 1) ws.send(payload);
+    else if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(payload);
+    else { connectLobby(); setTimeout(() => { if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(payload); }, 500); }
+  }, 400);
+}
 let myAgent = (AGENTS[localStorage.getItem('blockade_agent')] && isUnlocked(localStorage.getItem('blockade_agent'))) ? localStorage.getItem('blockade_agent') : 'soldier';
 const hex6 = n => '#' + n.toString(16).padStart(6, '0');
 const agentArtSVG = (h) => `<svg viewBox="0 0 20 24" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
@@ -157,14 +176,24 @@ let killStreak = 0;
 let multiKill = 0, lastKillTime = 0;   // rapid-frag (multi-kill) tracking
 let firstBloodDone = false;            // first kill of the current match
 let lookMul = parseFloat(localStorage.getItem('bf_sens') || '1') || 1;
+let fov = Math.max(60, Math.min(100, parseInt(localStorage.getItem('bf_fov')) || 70));
+let sndVol = (() => { const v = parseFloat(localStorage.getItem('bf_vol')); return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.8; })();
+function applyFov() { if (camera) { camera.fov = fov; camera.updateProjectionMatrix(); } }
+function applyVol() { if (masterGain) masterGain.gain.value = sndVol; }
 
 const tracers = [], particles = [], flashes = [], rockets = [], grenades = [];
 
 // ============================================================
 // Audio (tiny synth)
 // ============================================================
-let AC = null;
-function ac() { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); return AC; }
+let AC = null, masterGain = null;
+function ac() {
+  if (!AC) {
+    AC = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = AC.createGain(); masterGain.gain.value = sndVol; masterGain.connect(AC.destination);
+  }
+  return AC;
+}
 function noiseBurst(dur, freq, vol, type = 'lowpass') {
   try {
     const ctx = ac();
@@ -175,7 +204,7 @@ function noiseBurst(dur, freq, vol, type = 'lowpass') {
     const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq;
     const g = ctx.createGain(); g.gain.value = vol;
     g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-    src.connect(f); f.connect(g); g.connect(ctx.destination);
+    src.connect(f); f.connect(g); g.connect(masterGain || ctx.destination);
     src.start();
   } catch {}
 }
@@ -186,7 +215,7 @@ function tone(freq, dur, vol, type = 'square', slide = 0) {
     if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), ctx.currentTime + dur);
     const g = ctx.createGain(); g.gain.value = vol;
     g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-    o.connect(g); g.connect(ctx.destination);
+    o.connect(g); g.connect(masterGain || ctx.destination);
     o.start(); o.stop(ctx.currentTime + dur);
   } catch {}
 }
@@ -326,6 +355,18 @@ function setupMenu() {
       applyGfx();
     });
   }
+  // field of view (applies live)
+  const fovR = $('fovRange'), fovV = $('fovVal');
+  if (fovR) {
+    fovR.value = fov; if (fovV) fovV.textContent = fov;
+    fovR.addEventListener('input', () => { fov = parseInt(fovR.value) || 70; localStorage.setItem('bf_fov', String(fov)); if (fovV) fovV.textContent = fov; applyFov(); });
+  }
+  // master volume (applies live)
+  const volR = $('volRange'), volV = $('volVal');
+  if (volR) {
+    volR.value = sndVol; if (volV) volV.textContent = Math.round(sndVol * 100) + '%';
+    volR.addEventListener('input', () => { sndVol = parseFloat(volR.value); localStorage.setItem('bf_vol', String(sndVol)); if (volV) volV.textContent = Math.round(sndVol * 100) + '%'; applyVol(); });
+  }
   const start = () => {
     const name = input.value.trim();
     if (name.length < 2) { err.textContent = 'Nickname must be at least 2 characters!'; return; }
@@ -364,6 +405,18 @@ function setupMenu() {
   });
   if (myRoom && inv) inv.textContent = 'ROOM: ' + myRoom + ' (copy link)';
 
+  // let auth changes refresh the menu view (coins, chips, friends, auth state)
+  menuRefresh = () => { renderAgent(); renderFriends(); renderAuth(); const cb = $('coinBal'); if (cb) cb.textContent = '🪙 ' + coins; };
+
+  // ---- account panel ----
+  renderAuth();
+  const abtn = $('authBtn');
+  if (abtn) abtn.addEventListener('click', () => { $('authPanel').classList.toggle('open'); connectLobby(); });
+  $('loginBtn') && $('loginBtn').addEventListener('click', () => doAuth('login'));
+  $('registerBtn') && $('registerBtn').addEventListener('click', () => doAuth('register'));
+  $('logoutBtn') && $('logoutBtn').addEventListener('click', () => logout());
+  $('authPass') && $('authPass').addEventListener('keydown', e => { if (e.key === 'Enter') doAuth('login'); });
+
   // ---- friends panel ----
   connectLobby();
   renderFriends();
@@ -390,10 +443,15 @@ function connectLobby() {
   if (lobbyWs && (lobbyWs.readyState === 0 || lobbyWs.readyState === 1)) { requestPresence(); return; }
   try { lobbyWs = new WebSocket(wsBase()); } catch { return; }
   lobbyWs.onopen = () => {
-    lobbyWs.send(JSON.stringify({ t: 'hello', pid: myPid, name: (localStorage.getItem('blockade_name') || 'Player') }));
+    if (authToken && !account) lobbyWs.send(JSON.stringify({ t: 'auth_token', token: authToken }));
+    lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: (account ? account.user : (localStorage.getItem('blockade_name') || 'Player')) }));
     requestPresence();
   };
-  lobbyWs.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } if (m.t === 'presence') { presenceCache = m.online || {}; renderFriends(); } };
+  lobbyWs.onmessage = e => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.t === 'presence') { presenceCache = m.online || {}; renderFriends(); }
+    else if (m.t === 'auth') onAuth(m);
+  };
   lobbyWs.onclose = () => { lobbyWs = null; };
   if (!lobbyTimer) lobbyTimer = setInterval(requestPresence, 4000);
 }
@@ -439,6 +497,50 @@ function renderFriends() {
     row.appendChild(btns); list.appendChild(row);
   }
 }
+function onAuth(m) {
+  const msg = $('authMsg');
+  if (m.ok) {
+    account = { user: m.user, token: m.token };
+    authToken = m.token; localStorage.setItem('bf_token', m.token);
+    const pr = m.profile || {};
+    coins = pr.coins || 0;
+    unlocked = new Set((pr.unlocked && pr.unlocked.length) ? pr.unlocked : ['soldier']); unlocked.add('soldier');
+    friends = Array.isArray(pr.friends) ? pr.friends : [];
+    if (!isUnlocked(myAgent)) { myAgent = 'soldier'; localStorage.setItem('blockade_agent', 'soldier'); }
+    if (msg) msg.textContent = '';
+    if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: m.user }));
+    renderAuth(); if (menuRefresh) menuRefresh(); requestPresence();
+  } else if (msg) { msg.textContent = m.error || 'Auth failed'; }
+}
+function doAuth(kind) {
+  const u = ($('authUser')?.value || '').trim(), p = $('authPass')?.value || '';
+  if (u.length < 3) { $('authMsg').textContent = 'Username min 3 characters'; return; }
+  if (p.length < 4) { $('authMsg').textContent = 'Password min 4 characters'; return; }
+  connectLobby();
+  $('authMsg').textContent = '…';
+  const send = (tries) => {
+    if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: kind, user: u, pass: p }));
+    else if (tries > 0) setTimeout(() => send(tries - 1), 200);
+    else $('authMsg').textContent = 'Not connected — try again';
+  };
+  send(15);
+}
+function logout() {
+  account = null; authToken = null; localStorage.removeItem('bf_token');
+  coins = Math.max(0, parseInt(localStorage.getItem('bf_coins')) || 0);
+  try { const u = JSON.parse(localStorage.getItem('bf_unlocked')); unlocked = new Set(Array.isArray(u) ? u : ['soldier']); } catch { unlocked = new Set(['soldier']); }
+  unlocked.add('soldier');
+  try { const f = JSON.parse(localStorage.getItem('bf_friends')); friends = Array.isArray(f) ? f : []; } catch { friends = []; }
+  if (!isUnlocked(myAgent)) { myAgent = 'soldier'; localStorage.setItem('blockade_agent', 'soldier'); }
+  if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: (localStorage.getItem('blockade_name') || 'Player') }));
+  renderAuth(); if (menuRefresh) menuRefresh(); requestPresence();
+}
+function renderAuth() {
+  const inEl = $('authLoggedOut'), outEl = $('authLoggedIn');
+  if (!inEl || !outEl) return;
+  if (account) { inEl.style.display = 'none'; outEl.style.display = 'flex'; $('authWho').textContent = account.user; }
+  else { inEl.style.display = 'flex'; outEl.style.display = 'none'; }
+}
 
 // ============================================================
 // Networking
@@ -450,7 +552,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: myPid }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId() }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -2115,7 +2217,7 @@ function initScene() {
   scene.background = new THREE.Color(0x87ceeb);
   scene.fog = new THREE.Fog(0x87ceeb, 60, 140);
 
-  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.08, 300);
+  camera = new THREE.PerspectiveCamera(fov, innerWidth / innerHeight, 0.08, 300);
   scene.add(camera);
 
   renderer = new THREE.WebGLRenderer({ canvas: $('game'), antialias: false });
