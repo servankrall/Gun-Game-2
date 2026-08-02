@@ -91,6 +91,25 @@
   #optPanel .optrow { display: flex; align-items: center; gap: 10px; color: #cfd6e6; font-size: 9px; }
   #optPanel .optrow input[type=range] { width: 240px; }
   #optPanel .opthint { color: #8090ad; font-size: 8px; line-height: 1.9; text-align: center; }
+  #friendsPanel { display: none; flex-direction: column; gap: 8px; width: min(420px, 92vw); margin: 8px auto 0;
+    background: rgba(6,14,30,.72); border: 2px solid #2a3a5c; padding: 12px; }
+  #friendsPanel.open { display: flex; }
+  #friendsPanel .fcode { color: #cfd6e6; font-size: 9px; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; justify-content: center; }
+  #friendsPanel .fcode b { color: #ffd24a; }
+  #friendsPanel .fcopy, #friendsPanel .fadd button { background: #e9c65a; color: #2a1c00; border: 2px solid #000; font-family: inherit; font-size: 8px; padding: 5px 8px; cursor: pointer; }
+  #friendsPanel .fadd { display: flex; gap: 6px; }
+  #friendsPanel .fadd input { flex: 1; background: #0c1730; color: #fff; border: 2px solid #2a3a5c; padding: 7px; font-family: inherit; font-size: 9px; outline: none; text-transform: uppercase; }
+  #friendsList { display: flex; flex-direction: column; gap: 5px; max-height: 150px; overflow-y: auto; }
+  #friendsList .fempty { color: #8090ad; font-size: 8px; text-align: center; padding: 6px; }
+  #friendsList .frow { display: flex; align-items: center; gap: 8px; font-size: 9px; color: #cfd6e6; background: rgba(255,255,255,.05); padding: 6px 8px; }
+  #friendsList .fdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  #friendsList .fdot.on { background: #49c26a; box-shadow: 0 0 6px #49c26a; }
+  #friendsList .fdot.off { background: #55607a; }
+  #friendsList .fname { flex: 1; color: #fff; }
+  #friendsList .fstat { color: #8090ad; font-size: 8px; }
+  #friendsList .fbtns { display: flex; gap: 4px; }
+  #friendsList .fjoin { background: #49c26a; color: #04210f; border: 2px solid #000; font-family: inherit; font-size: 8px; padding: 4px 7px; cursor: pointer; }
+  #friendsList .fdel { background: transparent; color: #ff6a6a; border: none; font-size: 11px; cursor: pointer; }
   #menu .ver { position: absolute; left: 8px; bottom: 6px; color: #5d6a86; font-size: 8px; }
   #menu .credit { position: absolute; right: 8px; bottom: 6px; color: #8090ad; font-size: 8px; text-shadow: 1px 1px 0 #000; }
   @media (max-width: 760px) { .hide-sm { display: none; } #agentCard { width: 210px; height: 350px; } .pslot { height: 300px; } }
@@ -358,13 +377,21 @@
       </div>
       <div class="bside right">
         <button id="inviteBtn" class="linkbtn">⧉ INVITE FRIENDS</button>
+        <button id="friendsBtn" class="linkbtn">👥 FRIENDS</button>
       </div>
     </div>
 
     <div class="err" id="menuErr"></div>
 
+    <div id="friendsPanel">
+      <div class="fcode">YOUR CODE: <b id="myCode">------</b> <button id="copyCodeBtn" class="fcopy">COPY</button></div>
+      <div class="fadd"><input id="friendCodeInput" maxlength="12" placeholder="Friend code" autocomplete="off"><button id="friendAddBtn">ADD</button></div>
+      <div id="friendsList"></div>
+    </div>
+
     <div id="optPanel">
       <div class="optrow"><span>LOOK SENS</span><input id="sensRange" type="range" min="0.4" max="2" step="0.05"><span id="sensVal">1.00x</span></div>
+      <div class="optrow"><span>GRAPHICS</span><select id="gfxSel"><option value="high">HIGH</option><option value="low">LOW (faster)</option></select></div>
       <div class="opthint">
         WASD move · LMB fire · RMB aim · 1-9 weapons · G grenade<br>
         SPACE jump · SHIFT sprint · TAB scoreboard · R reload · T chat · V voice
@@ -635,6 +662,23 @@ class GameServer {
     this.nextId = 1;
     this.tick = null;
     this.lastTick = Date.now();
+    this.online = new Map();  // pid -> { name, room, socks:Set } for friend presence
+  }
+
+  // ---- friend presence (pid = a persistent client id sent at hello/join) ----
+  presenceOnline(pid, name, room, conn) {
+    let e = this.online.get(pid);
+    if (!e) { e = { name, room, socks: new Set() }; this.online.set(pid, e); }
+    e.name = name || e.name; e.room = room; e.socks.add(conn);
+  }
+  presenceOffline(pid, conn) {
+    const e = this.online.get(pid); if (!e) return;
+    e.socks.delete(conn); if (!e.socks.size) this.online.delete(pid);
+  }
+  presenceQuery(pids) {
+    const out = {};
+    for (const pid of pids) { const e = this.online.get(pid); if (e) out[pid] = { name: e.name, room: e.room }; }
+    return out;
   }
 
   room(id) {
@@ -647,19 +691,33 @@ class GameServer {
   }
 
   onConnect(ws) {
-    let id = null, roomId = null;
+    let id = null, roomId = null, pid = null; const conn = {};
     ws.addEventListener('message', ev => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.t === 'hello') { // lobby presence (menu, no game join)
+        pid = String(m.pid || '').toUpperCase().slice(0, 12) || null;
+        if (pid) this.presenceOnline(pid, String(m.name || 'Player').slice(0, 16), 'lobby', conn);
+        return;
+      }
+      if (m.t === 'presence_req') {
+        this.send(ws, { t: 'presence', online: this.presenceQuery((Array.isArray(m.pids) ? m.pids : []).slice(0, 50)) });
+        return;
+      }
       if (m.t === 'join') {
         if (id !== null) return;
         roomId = String(m.room || 'pub').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'pub';
+        pid = String(m.pid || pid || '').toUpperCase().slice(0, 12) || null;
         id = this.handleJoin(ws, m, roomId);
+        if (pid) this.presenceOnline(pid, String(m.name || 'Player').slice(0, 16), roomId, conn);
         return;
       }
       if (id === null) return;
       this.handleMsg(roomId, id, m);
     });
-    const bye = () => { if (id !== null) { this.handleLeave(roomId, id); id = null; } };
+    const bye = () => {
+      if (id !== null) { this.handleLeave(roomId, id); id = null; }
+      if (pid) { this.presenceOffline(pid, conn); }
+    };
     ws.addEventListener('close', bye);
     ws.addEventListener('error', bye);
   }
@@ -1439,6 +1497,16 @@ let gameMode = 'dm';   // 'dm' (deathmatch) | 'ctf' (capture the flag) | 'gg' (g
 let menuMode = 'dm';   // mode chosen on the menu, sent at join
 let myLevel = 0;       // gun-game rung (index into GG_LADDER)
 let sunLight = null, ambLight = null;
+// Graphics quality: 'low' drops shadows + pixel ratio for weaker devices.
+let gfxQuality = localStorage.getItem('bf_gfx') === 'low' ? 'low' : 'high';
+function applyGfx() {
+  if (!renderer) return;
+  const low = gfxQuality === 'low';
+  renderer.setPixelRatio(low ? 1 : Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = !low;
+  renderer.shadowMap.needsUpdate = true;
+  if (sunLight) sunLight.castShadow = !low;
+}
 let mapTheme = 'desert', menuMap = 'desert';
 // Map themes: same arena collision, different look (materials + sky/fog/light).
 const THEMES = {
@@ -1488,6 +1556,12 @@ function isUnlocked(id) { return (AGENTS[id]?.cost || 0) === 0 || unlocked.has(i
 function saveCoins() { localStorage.setItem('bf_coins', String(coins)); }
 function saveUnlocked() { localStorage.setItem('bf_unlocked', JSON.stringify([...unlocked])); }
 function awardCoins(n) { coins += n; saveCoins(); const el = $('coinBal'); if (el) el.textContent = '🪙 ' + coins; }
+// ---- persistent identity + friends (friend code = your player id) ----
+let myPid = localStorage.getItem('bf_pid');
+if (!myPid) { myPid = Math.random().toString(36).slice(2, 8).toUpperCase(); localStorage.setItem('bf_pid', myPid); }
+let friends = (() => { try { const f = JSON.parse(localStorage.getItem('bf_friends')); return Array.isArray(f) ? f : []; } catch { return []; } })();
+function saveFriends() { localStorage.setItem('bf_friends', JSON.stringify(friends)); }
+let lobbyWs = null, lobbyTimer = null, presenceCache = {};
 let myAgent = (AGENTS[localStorage.getItem('blockade_agent')] && isUnlocked(localStorage.getItem('blockade_agent'))) ? localStorage.getItem('blockade_agent') : 'soldier';
 const hex6 = n => '#' + n.toString(16).padStart(6, '0');
 const agentArtSVG = (h) => `<svg viewBox="0 0 20 24" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
@@ -1660,6 +1734,17 @@ function setupMenu() {
   // options panel toggle
   const optBtn = $('optBtn');
   if (optBtn) optBtn.addEventListener('click', () => $('optPanel').classList.toggle('open'));
+
+  // graphics quality (applies live)
+  const gfxSel = $('gfxSel');
+  if (gfxSel) {
+    gfxSel.value = gfxQuality;
+    gfxSel.addEventListener('change', () => {
+      gfxQuality = gfxSel.value === 'low' ? 'low' : 'high';
+      localStorage.setItem('bf_gfx', gfxQuality);
+      applyGfx();
+    });
+  }
   const start = () => {
     const name = input.value.trim();
     if (name.length < 2) { err.textContent = 'Nickname must be at least 2 characters!'; return; }
@@ -1697,6 +1782,81 @@ function setupMenu() {
     else inv.textContent = link;
   });
   if (myRoom && inv) inv.textContent = 'ROOM: ' + myRoom + ' (copy link)';
+
+  // ---- friends panel ----
+  connectLobby();
+  renderFriends();
+  const fb = $('friendsBtn');
+  if (fb) fb.addEventListener('click', () => { $('friendsPanel').classList.toggle('open'); connectLobby(); requestPresence(); });
+  const fin = $('friendCodeInput'), fadd = $('friendAddBtn');
+  if (fadd && fin) fadd.addEventListener('click', () => { addFriend(fin.value); fin.value = ''; });
+  if (fin) fin.addEventListener('keydown', e => { if (e.key === 'Enter') { addFriend(fin.value); fin.value = ''; } });
+  const cc = $('copyCodeBtn');
+  if (cc) cc.addEventListener('click', () => {
+    if (navigator.clipboard) navigator.clipboard.writeText(myPid).then(() => { cc.textContent = 'COPIED ✓'; setTimeout(() => cc.textContent = 'COPY', 1400); }).catch(() => {});
+  });
+}
+
+// ============================================================
+// Friends / presence (lightweight lobby socket used only in the menu)
+// ============================================================
+function wsBase() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const base = location.pathname.replace(/\/+$/, '');
+  return `${proto}://${location.host}${base}/ws`;
+}
+function connectLobby() {
+  if (lobbyWs && (lobbyWs.readyState === 0 || lobbyWs.readyState === 1)) { requestPresence(); return; }
+  try { lobbyWs = new WebSocket(wsBase()); } catch { return; }
+  lobbyWs.onopen = () => {
+    lobbyWs.send(JSON.stringify({ t: 'hello', pid: myPid, name: (localStorage.getItem('blockade_name') || 'Player') }));
+    requestPresence();
+  };
+  lobbyWs.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } if (m.t === 'presence') { presenceCache = m.online || {}; renderFriends(); } };
+  lobbyWs.onclose = () => { lobbyWs = null; };
+  if (!lobbyTimer) lobbyTimer = setInterval(requestPresence, 4000);
+}
+function requestPresence() {
+  if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: 'presence_req', pids: friends.map(f => f.code) }));
+}
+function closeLobby() {
+  if (lobbyTimer) { clearInterval(lobbyTimer); lobbyTimer = null; }
+  if (lobbyWs) { try { lobbyWs.close(); } catch {} lobbyWs = null; }
+}
+function addFriend(code, name) {
+  code = String(code || '').trim().toUpperCase().slice(0, 12);
+  if (!code || code === myPid || friends.some(f => f.code === code)) return;
+  friends.push({ code, name: String(name || '').trim().slice(0, 16) || code });
+  saveFriends(); renderFriends(); requestPresence();
+}
+function removeFriend(code) { friends = friends.filter(f => f.code !== code); saveFriends(); renderFriends(); }
+function joinFriend(room) {
+  const nm = ($('nameInput').value || '').trim() || localStorage.getItem('blockade_name') || '';
+  if (nm.length < 2) { $('menuErr').textContent = 'Enter a nickname first!'; return; }
+  myRoom = room;
+  const u = new URL(location.href); u.searchParams.set('room', room); history.replaceState(null, '', u);
+  localStorage.setItem('blockade_name', nm);
+  $('playBtn').disabled = true;
+  connect(nm);
+}
+function renderFriends() {
+  const codeEl = $('myCode'); if (codeEl) codeEl.textContent = myPid;
+  const list = $('friendsList'); if (!list) return;
+  list.innerHTML = '';
+  if (!friends.length) { list.innerHTML = '<div class="fempty">No friends yet — share your code and add theirs.</div>'; return; }
+  for (const f of friends) {
+    const p = presenceCache[f.code];
+    const online = !!p;
+    const room = online && p.room && p.room !== 'lobby' ? p.room : null;
+    const row = document.createElement('div'); row.className = 'frow';
+    const dot = document.createElement('span'); dot.className = 'fdot ' + (online ? 'on' : 'off'); row.appendChild(dot);
+    const nm = document.createElement('span'); nm.className = 'fname'; nm.textContent = f.name || f.code; row.appendChild(nm);
+    const st = document.createElement('span'); st.className = 'fstat'; st.textContent = online ? (room ? 'room ' + room : 'online') : 'offline'; row.appendChild(st);
+    const btns = document.createElement('span'); btns.className = 'fbtns';
+    if (room) { const j = document.createElement('button'); j.textContent = 'JOIN'; j.className = 'fjoin'; j.addEventListener('click', () => joinFriend(room)); btns.appendChild(j); }
+    const d = document.createElement('button'); d.textContent = '✕'; d.className = 'fdel'; d.addEventListener('click', () => removeFriend(f.code)); btns.appendChild(d);
+    row.appendChild(btns); list.appendChild(row);
+  }
 }
 
 // ============================================================
@@ -1704,11 +1864,12 @@ function setupMenu() {
 // ============================================================
 function connect(name) {
   myName = name;
+  closeLobby(); // hand presence over to the game socket
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: myPid }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -1720,6 +1881,7 @@ function connect(name) {
       $('menu').style.display = 'flex';
       $('menuErr').textContent = 'Connection lost. Join again!';
       $('playBtn').disabled = false;
+      connectLobby(); // resume friend presence in the menu
     }
   };
   ws.onmessage = e => {
@@ -3377,16 +3539,15 @@ function initScene() {
 
   renderer = new THREE.WebGLRenderer({ canvas: $('game'), antialias: false });
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
+  applyGfx(); // pixel ratio + shadows from the saved quality setting
 
   ambLight = new THREE.AmbientLight(0xffffff, 0.75);
   scene.add(ambLight);
   const sun = new THREE.DirectionalLight(0xfff4d6, 1.6);
   sunLight = sun;
   sun.position.set(40, 70, 25);
-  sun.castShadow = true;
+  sun.castShadow = gfxQuality !== 'low';
   sun.shadow.mapSize.set(1024, 1024); // 1024 instead of 2048 — 4x cheaper shadow pass, big win on the occasional stutter
   sun.shadow.camera.left = -50; sun.shadow.camera.right = 50;
   sun.shadow.camera.top = 50; sun.shadow.camera.bottom = -50;

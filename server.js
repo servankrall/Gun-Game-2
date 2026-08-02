@@ -176,6 +176,23 @@ export class GameServer extends DurableObject {
     this.nextId = 1;
     this.tick = null;
     this.lastTick = Date.now();
+    this.online = new Map();  // pid -> { name, room, socks:Set } for friend presence
+  }
+
+  // ---- friend presence (pid = a persistent client id sent at hello/join) ----
+  presenceOnline(pid, name, room, conn) {
+    let e = this.online.get(pid);
+    if (!e) { e = { name, room, socks: new Set() }; this.online.set(pid, e); }
+    e.name = name || e.name; e.room = room; e.socks.add(conn);
+  }
+  presenceOffline(pid, conn) {
+    const e = this.online.get(pid); if (!e) return;
+    e.socks.delete(conn); if (!e.socks.size) this.online.delete(pid);
+  }
+  presenceQuery(pids) {
+    const out = {};
+    for (const pid of pids) { const e = this.online.get(pid); if (e) out[pid] = { name: e.name, room: e.room }; }
+    return out;
   }
 
   room(id) {
@@ -198,19 +215,33 @@ export class GameServer extends DurableObject {
   }
 
   onConnect(ws) {
-    let id = null, roomId = null;
+    let id = null, roomId = null, pid = null; const conn = {};
     ws.addEventListener('message', ev => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.t === 'hello') { // lobby presence (menu, no game join)
+        pid = String(m.pid || '').toUpperCase().slice(0, 12) || null;
+        if (pid) this.presenceOnline(pid, String(m.name || 'Player').slice(0, 16), 'lobby', conn);
+        return;
+      }
+      if (m.t === 'presence_req') {
+        this.send(ws, { t: 'presence', online: this.presenceQuery((Array.isArray(m.pids) ? m.pids : []).slice(0, 50)) });
+        return;
+      }
       if (m.t === 'join') {
         if (id !== null) return;
         roomId = String(m.room || 'pub').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'pub';
+        pid = String(m.pid || pid || '').toUpperCase().slice(0, 12) || null;
         id = this.handleJoin(ws, m, roomId);
+        if (pid) this.presenceOnline(pid, String(m.name || 'Player').slice(0, 16), roomId, conn);
         return;
       }
       if (id === null) return;
       this.handleMsg(roomId, id, m);
     });
-    const bye = () => { if (id !== null) { this.handleLeave(roomId, id); id = null; } };
+    const bye = () => {
+      if (id !== null) { this.handleLeave(roomId, id); id = null; }
+      if (pid) { this.presenceOffline(pid, conn); }
+    };
     ws.addEventListener('close', bye);
     ws.addEventListener('error', bye);
   }

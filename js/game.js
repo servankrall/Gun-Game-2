@@ -78,6 +78,16 @@ let gameMode = 'dm';   // 'dm' (deathmatch) | 'ctf' (capture the flag) | 'gg' (g
 let menuMode = 'dm';   // mode chosen on the menu, sent at join
 let myLevel = 0;       // gun-game rung (index into GG_LADDER)
 let sunLight = null, ambLight = null;
+// Graphics quality: 'low' drops shadows + pixel ratio for weaker devices.
+let gfxQuality = localStorage.getItem('bf_gfx') === 'low' ? 'low' : 'high';
+function applyGfx() {
+  if (!renderer) return;
+  const low = gfxQuality === 'low';
+  renderer.setPixelRatio(low ? 1 : Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = !low;
+  renderer.shadowMap.needsUpdate = true;
+  if (sunLight) sunLight.castShadow = !low;
+}
 let mapTheme = 'desert', menuMap = 'desert';
 // Map themes: same arena collision, different look (materials + sky/fog/light).
 const THEMES = {
@@ -127,6 +137,12 @@ function isUnlocked(id) { return (AGENTS[id]?.cost || 0) === 0 || unlocked.has(i
 function saveCoins() { localStorage.setItem('bf_coins', String(coins)); }
 function saveUnlocked() { localStorage.setItem('bf_unlocked', JSON.stringify([...unlocked])); }
 function awardCoins(n) { coins += n; saveCoins(); const el = $('coinBal'); if (el) el.textContent = '🪙 ' + coins; }
+// ---- persistent identity + friends (friend code = your player id) ----
+let myPid = localStorage.getItem('bf_pid');
+if (!myPid) { myPid = Math.random().toString(36).slice(2, 8).toUpperCase(); localStorage.setItem('bf_pid', myPid); }
+let friends = (() => { try { const f = JSON.parse(localStorage.getItem('bf_friends')); return Array.isArray(f) ? f : []; } catch { return []; } })();
+function saveFriends() { localStorage.setItem('bf_friends', JSON.stringify(friends)); }
+let lobbyWs = null, lobbyTimer = null, presenceCache = {};
 let myAgent = (AGENTS[localStorage.getItem('blockade_agent')] && isUnlocked(localStorage.getItem('blockade_agent'))) ? localStorage.getItem('blockade_agent') : 'soldier';
 const hex6 = n => '#' + n.toString(16).padStart(6, '0');
 const agentArtSVG = (h) => `<svg viewBox="0 0 20 24" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
@@ -299,6 +315,17 @@ function setupMenu() {
   // options panel toggle
   const optBtn = $('optBtn');
   if (optBtn) optBtn.addEventListener('click', () => $('optPanel').classList.toggle('open'));
+
+  // graphics quality (applies live)
+  const gfxSel = $('gfxSel');
+  if (gfxSel) {
+    gfxSel.value = gfxQuality;
+    gfxSel.addEventListener('change', () => {
+      gfxQuality = gfxSel.value === 'low' ? 'low' : 'high';
+      localStorage.setItem('bf_gfx', gfxQuality);
+      applyGfx();
+    });
+  }
   const start = () => {
     const name = input.value.trim();
     if (name.length < 2) { err.textContent = 'Nickname must be at least 2 characters!'; return; }
@@ -336,6 +363,81 @@ function setupMenu() {
     else inv.textContent = link;
   });
   if (myRoom && inv) inv.textContent = 'ROOM: ' + myRoom + ' (copy link)';
+
+  // ---- friends panel ----
+  connectLobby();
+  renderFriends();
+  const fb = $('friendsBtn');
+  if (fb) fb.addEventListener('click', () => { $('friendsPanel').classList.toggle('open'); connectLobby(); requestPresence(); });
+  const fin = $('friendCodeInput'), fadd = $('friendAddBtn');
+  if (fadd && fin) fadd.addEventListener('click', () => { addFriend(fin.value); fin.value = ''; });
+  if (fin) fin.addEventListener('keydown', e => { if (e.key === 'Enter') { addFriend(fin.value); fin.value = ''; } });
+  const cc = $('copyCodeBtn');
+  if (cc) cc.addEventListener('click', () => {
+    if (navigator.clipboard) navigator.clipboard.writeText(myPid).then(() => { cc.textContent = 'COPIED ✓'; setTimeout(() => cc.textContent = 'COPY', 1400); }).catch(() => {});
+  });
+}
+
+// ============================================================
+// Friends / presence (lightweight lobby socket used only in the menu)
+// ============================================================
+function wsBase() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const base = location.pathname.replace(/\/+$/, '');
+  return `${proto}://${location.host}${base}/ws`;
+}
+function connectLobby() {
+  if (lobbyWs && (lobbyWs.readyState === 0 || lobbyWs.readyState === 1)) { requestPresence(); return; }
+  try { lobbyWs = new WebSocket(wsBase()); } catch { return; }
+  lobbyWs.onopen = () => {
+    lobbyWs.send(JSON.stringify({ t: 'hello', pid: myPid, name: (localStorage.getItem('blockade_name') || 'Player') }));
+    requestPresence();
+  };
+  lobbyWs.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } if (m.t === 'presence') { presenceCache = m.online || {}; renderFriends(); } };
+  lobbyWs.onclose = () => { lobbyWs = null; };
+  if (!lobbyTimer) lobbyTimer = setInterval(requestPresence, 4000);
+}
+function requestPresence() {
+  if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: 'presence_req', pids: friends.map(f => f.code) }));
+}
+function closeLobby() {
+  if (lobbyTimer) { clearInterval(lobbyTimer); lobbyTimer = null; }
+  if (lobbyWs) { try { lobbyWs.close(); } catch {} lobbyWs = null; }
+}
+function addFriend(code, name) {
+  code = String(code || '').trim().toUpperCase().slice(0, 12);
+  if (!code || code === myPid || friends.some(f => f.code === code)) return;
+  friends.push({ code, name: String(name || '').trim().slice(0, 16) || code });
+  saveFriends(); renderFriends(); requestPresence();
+}
+function removeFriend(code) { friends = friends.filter(f => f.code !== code); saveFriends(); renderFriends(); }
+function joinFriend(room) {
+  const nm = ($('nameInput').value || '').trim() || localStorage.getItem('blockade_name') || '';
+  if (nm.length < 2) { $('menuErr').textContent = 'Enter a nickname first!'; return; }
+  myRoom = room;
+  const u = new URL(location.href); u.searchParams.set('room', room); history.replaceState(null, '', u);
+  localStorage.setItem('blockade_name', nm);
+  $('playBtn').disabled = true;
+  connect(nm);
+}
+function renderFriends() {
+  const codeEl = $('myCode'); if (codeEl) codeEl.textContent = myPid;
+  const list = $('friendsList'); if (!list) return;
+  list.innerHTML = '';
+  if (!friends.length) { list.innerHTML = '<div class="fempty">No friends yet — share your code and add theirs.</div>'; return; }
+  for (const f of friends) {
+    const p = presenceCache[f.code];
+    const online = !!p;
+    const room = online && p.room && p.room !== 'lobby' ? p.room : null;
+    const row = document.createElement('div'); row.className = 'frow';
+    const dot = document.createElement('span'); dot.className = 'fdot ' + (online ? 'on' : 'off'); row.appendChild(dot);
+    const nm = document.createElement('span'); nm.className = 'fname'; nm.textContent = f.name || f.code; row.appendChild(nm);
+    const st = document.createElement('span'); st.className = 'fstat'; st.textContent = online ? (room ? 'room ' + room : 'online') : 'offline'; row.appendChild(st);
+    const btns = document.createElement('span'); btns.className = 'fbtns';
+    if (room) { const j = document.createElement('button'); j.textContent = 'JOIN'; j.className = 'fjoin'; j.addEventListener('click', () => joinFriend(room)); btns.appendChild(j); }
+    const d = document.createElement('button'); d.textContent = '✕'; d.className = 'fdel'; d.addEventListener('click', () => removeFriend(f.code)); btns.appendChild(d);
+    row.appendChild(btns); list.appendChild(row);
+  }
 }
 
 // ============================================================
@@ -343,11 +445,12 @@ function setupMenu() {
 // ============================================================
 function connect(name) {
   myName = name;
+  closeLobby(); // hand presence over to the game socket
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: myPid }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -359,6 +462,7 @@ function connect(name) {
       $('menu').style.display = 'flex';
       $('menuErr').textContent = 'Connection lost. Join again!';
       $('playBtn').disabled = false;
+      connectLobby(); // resume friend presence in the menu
     }
   };
   ws.onmessage = e => {
@@ -2016,16 +2120,15 @@ function initScene() {
 
   renderer = new THREE.WebGLRenderer({ canvas: $('game'), antialias: false });
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
+  applyGfx(); // pixel ratio + shadows from the saved quality setting
 
   ambLight = new THREE.AmbientLight(0xffffff, 0.75);
   scene.add(ambLight);
   const sun = new THREE.DirectionalLight(0xfff4d6, 1.6);
   sunLight = sun;
   sun.position.set(40, 70, 25);
-  sun.castShadow = true;
+  sun.castShadow = gfxQuality !== 'low';
   sun.shadow.mapSize.set(1024, 1024); // 1024 instead of 2048 — 4x cheaper shadow pass, big win on the occasional stutter
   sun.shadow.camera.left = -50; sun.shadow.camera.right = 50;
   sun.shadow.camera.top = 50; sun.shadow.camera.bottom = -50;
