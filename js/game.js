@@ -632,6 +632,15 @@ function renderAuth() {
   else { inEl.style.display = 'flex'; outEl.style.display = 'none'; }
 }
 
+// Leave the current match and go back to the main menu.
+function leaveGame() {
+  try { document.exitPointerLock(); } catch {}
+  hideMatchOver();
+  const ph = $('pauseHint'); if (ph) ph.style.display = 'none';
+  if (ws && (ws.readyState === 0 || ws.readyState === 1)) { try { ws.close(); } catch {} } // onclose returns to the menu
+  else { inGame = false; $('hud').style.display = 'none'; $('menu').style.display = 'flex'; connectLobby(); }
+}
+
 // ============================================================
 // Networking
 // ============================================================
@@ -681,6 +690,7 @@ function handleMsg(m) {
       gameMode = m.mode || 'dm';
       scoreLimit = m.limit || m.scoreLimit || 150;
       applyTheme(m.map || 'desert');
+      buildWorld(m.map || 'desert'); // rebuild geometry for this room's (random) map
       updateCount(m.count);
       for (const p of m.players) addRemote(p);
       // destroyed map blocks first, then player-built blocks (a built block may occupy a destroyed spot)
@@ -691,6 +701,7 @@ function handleMsg(m) {
       startGame();
       setGunGameUI(gameMode === 'gg');
       if (gameMode === 'gg') applyGunGameWeapon();
+      feed('MAP: ' + (THEMES[mapTheme]?.name || mapTheme), myTeam);
       initVoice();
       break;
     }
@@ -1058,8 +1069,16 @@ function setTalking(on) {
 // ============================================================
 // World
 // ============================================================
-function buildWorld() {
-  const blocks = buildMapBlocks();
+let worldMeshes = [];
+function buildWorld(mapId = 'desert') {
+  // clear any previously-built static map (map is chosen per room, so we rebuild
+  // when the welcome message tells us which one this room uses)
+  for (const mesh of worldMeshes) scene.remove(mesh);
+  worldMeshes = [];
+  mapBlockIndex.clear();
+  collision.clear();
+  for (const k of placedMeshes.keys()) collision.add(k); // keep any player-built blocks
+  const blocks = buildMapBlocks(mapId);
   const byType = {};
   for (const b of blocks) {
     (byType[b.type] ||= []).push(b);
@@ -1068,6 +1087,7 @@ function buildWorld() {
   const geo = new THREE.BoxGeometry(1, 1, 1);
   const m4 = new THREE.Matrix4();
   for (const [type, list] of Object.entries(byType)) {
+    if (!mats[type]) continue;
     const mesh = new THREE.InstancedMesh(geo, mats[type], list.length);
     list.forEach((b, i) => {
       m4.makeTranslation(b.x + 0.5, b.y + 0.5, b.z + 0.5);
@@ -1077,6 +1097,7 @@ function buildWorld() {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     scene.add(mesh);
+    worldMeshes.push(mesh);
   }
 }
 
@@ -2198,6 +2219,8 @@ function setupInput() {
     if (!locked) { mouseDown = false; Object.keys(keys).forEach(k => keys[k] = false); }
   });
   $('resumeBtn').addEventListener('click', () => canvas.requestPointerLock());
+  $('menuBtnPause') && $('menuBtnPause').addEventListener('click', leaveGame);
+  $('menuBtnOver') && $('menuBtnOver').addEventListener('click', leaveGame);
   window.addEventListener('resize', () => {
     camera.aspect = innerWidth / innerHeight;
     camera.updateProjectionMatrix();

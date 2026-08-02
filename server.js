@@ -12,6 +12,8 @@ import { DurableObject } from 'cloudflare:workers';
 // The deploy validator forbids importing local modules, hence the copy.
 // ============================================================
 const HALF = 32;
+const MAPS = ['desert', 'arctic', 'volcano', 'night', 'metro', 'toxic'];
+const randomMap = () => MAPS[Math.floor(Math.random() * MAPS.length)];
 function seededRng(seed) {
   let s = seed >>> 0;
   return () => {
@@ -21,94 +23,109 @@ function seededRng(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-function buildMapBlocks() {
+function mapSeed(id) { let h = 2166136261; const s = String(id); for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
+const MAP_STYLE = {
+  desert:  { ground: 'sand',  speckle: ['gravel', 'dirt'],  pillar: 'cobble', wall: 'bricks', roof: 'planks' },
+  arctic:  { ground: 'sand',  speckle: ['stone', 'cobble'], pillar: 'stone',  wall: 'stone',  roof: 'planks' },
+  volcano: { ground: 'gravel', speckle: ['stone', 'cobble'], pillar: 'cobble', wall: 'cobble', roof: 'gravel' },
+  night:   { ground: 'stone', speckle: ['cobble', 'gravel'], pillar: 'bricks', wall: 'bricks', roof: 'planks' },
+  metro:   { ground: 'stone', speckle: ['cobble', 'gravel'], pillar: 'stone',  wall: 'cobble', roof: 'planks' },
+  toxic:   { ground: 'grass', speckle: ['dirt', 'leaves'],  pillar: 'log',    wall: 'stone',  roof: 'leaves' },
+};
+function scatterCover(r, style, box, count, maxH) {
+  for (let i = 0; i < count; i++) {
+    const cx = 6 + Math.floor(r() * 14), cz = Math.floor(r() * 52) - 26, len = 2 + Math.floor(r() * 3), alongX = r() < 0.5;
+    if (cx <= 9 && Math.abs(cz) <= 9) continue;
+    if (Math.abs(cz) >= 13 && Math.abs(cz) <= 16) continue;
+    for (let j = 0; j < len; j++) {
+      const h = 1 + Math.floor(r() * maxH), bx = alongX ? cx + j : cx, bz = alongX ? cz : cz + j;
+      if (Math.abs(bx) > 24 || Math.abs(bz) > 29) continue;
+      box(bx, 1, bz, bx, h, bz, style.wall); box(-bx - 1, 1, bz, -bx - 1, h, bz, style.wall);
+    }
+  }
+}
+function buildCentre(mapId, style, r, h) {
+  const { set, box, carve } = h;
+  if (mapId === 'desert') {
+    for (let y = 1; y <= 5; y++) { const B = 8 - y; for (let x = -B; x <= B; x++) for (let z = -B; z <= B; z++) set(x, y, z, y === 1 ? 'cobble' : (r() < 0.22 ? 'cobble' : 'sand')); }
+    carve(-3, 1, -3, 3, 3, 3); carve(-7, 1, -1, 7, 2, 1); carve(-1, 1, -7, 1, 2, 7); carve(0, 1, 0, 0, 5, 0);
+    [[-3, -3], [-3, 3], [3, -3], [3, 3], [0, 3], [0, -3], [3, 0], [-3, 0]].forEach(([x, z]) => { if (x || z) set(x, 6, z, 'cobble'); });
+    set(-2, 1, 2, 'redWool'); set(2, 1, -2, 'blueWool');
+    [[11, 4, 4], [8, 9, 4], [4, 11, 3]].forEach(([px, pz, ph]) => [[px, pz], [-px - 1, pz]].forEach(([x, z]) => { box(x, 1, z, x, ph, z, style.pillar); set(x, ph + 1, z, 'leaves'); }));
+    scatterCover(r, style, box, 8, 3);
+  } else if (mapId === 'arctic') {
+    box(-7, 1, -7, 7, 4, 7, style.wall); carve(-6, 1, -6, 6, 4, 6);
+    carve(-7, 1, -1, 7, 2, 1); carve(-1, 1, -7, 1, 2, 7);
+    [[-7, -7], [7, -7], [-7, 7], [7, 7]].forEach(([x, z]) => box(x < 0 ? x - 1 : x, 1, z < 0 ? z - 1 : z, x < 0 ? x : x + 1, 6, z < 0 ? z : z + 1, style.pillar));
+    for (let x = -7; x <= 7; x += 2) { set(x, 5, -7, style.roof); set(x, 5, 7, style.roof); }
+    for (let z = -7; z <= 7; z += 2) { set(-7, 5, z, style.roof); set(7, 5, z, style.roof); }
+    set(0, 1, 0, 'redWool'); set(1, 1, 0, 'blueWool');
+    scatterCover(r, style, box, 10, 3);
+  } else if (mapId === 'volcano') {
+    for (let y = 1; y <= 6; y++) { const B = 9 - y; for (let x = -B; x <= B; x++) for (let z = -B; z <= B; z++) if (Math.hypot(x, z) <= B + 0.3) set(x, y, z, r() < 0.3 ? 'gravel' : 'cobble'); }
+    carve(-1, 4, -1, 1, 6, 1); box(-1, 4, -1, 1, 4, 1, 'redWool'); set(0, 5, 0, 'redWool');
+    [[12, 6], [7, 12], [14, -8], [-9, 10]].forEach(([px, pz]) => { const ph = 2 + Math.floor(r() * 4); box(px, 1, pz, px, ph, pz, style.pillar); box(-px - 1, 1, pz, -px - 1, ph, pz, style.pillar); });
+    scatterCover(r, style, box, 9, 2);
+  } else if (mapId === 'night') {
+    const bld = (x, z, w, d, ht) => { box(x, 1, z, x + w, ht, z + d, style.wall); carve(x + 1, 1, z + 1, x + w - 1, ht - 1, z + d - 1); box(x, ht + 1, z, x + w, ht + 1, z + d, style.roof); };
+    [[-9, -9, 6, 6, 6], [3, -10, 5, 5, 8], [-10, 3, 5, 6, 5], [4, 4, 6, 6, 7]].forEach(([x, z, w, d, ht]) => bld(x, z, w, d, ht));
+    scatterCover(r, style, box, 12, 3);
+  } else if (mapId === 'metro') {
+    for (let gx = -12; gx <= 8; gx += 8) for (let gz = -12; gz <= 8; gz += 8) {
+      if (Math.abs(gx + 2) <= 3 && Math.abs(gz + 2) <= 3) continue;
+      const ht = 2 + Math.floor(r() * 2);
+      box(gx, 1, gz, gx + 4, ht, gz + 3, r() < 0.5 ? style.wall : style.pillar);
+    }
+    box(-9, 4, -1, 9, 4, 1, style.roof); box(-9, 1, -1, -9, 4, 1, style.pillar); box(9, 1, -1, 9, 4, 1, style.pillar);
+    scatterCover(r, style, box, 10, 3);
+  } else {
+    for (let y = 1; y <= 4; y++) { const B = 6 - y; for (let x = -B; x <= B; x++) for (let z = -B; z <= B; z++) if (Math.hypot(x, z) <= B + 0.4 && r() < 0.9) set(x, y, z, y >= 3 ? 'leaves' : 'dirt'); }
+    const tree = (px, pz, ht) => { box(px, 1, pz, px, ht, pz, 'log'); set(px, ht + 1, pz, 'leaves'); };
+    [[10, 8], [8, -11], [-12, 9], [13, -6], [-8, -12]].forEach(([px, pz]) => { tree(px, pz, 2 + Math.floor(r() * 3)); tree(-px - 1, pz, 2 + Math.floor(r() * 3)); });
+    for (let i = 0; i < 10; i++) { const cx = 6 + Math.floor(r() * 16), cz = Math.floor(r() * 50) - 25; if (Math.hypot(cx, cz) < 8) continue; box(cx, 1, cz, cx + 1, 1, cz + 1, 'dirt'); box(-cx - 2, 1, cz, -cx - 1, 1, cz + 1, 'dirt'); }
+    scatterCover(r, style, box, 7, 2);
+  }
+}
+function buildMapBlocks(mapId) {
+  const style = MAP_STYLE[mapId] || MAP_STYLE.desert;
   const m = new Map();
   const set = (x, y, z, type) => m.set(`${x},${y},${z}`, { x, y, z, type });
   const del = (x, y, z) => m.delete(`${x},${y},${z}`);
-  const box = (x0, y0, z0, x1, y1, z1, type) => {
-    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) set(x, y, z, type);
-  };
-  const carve = (x0, y0, z0, x1, y1, z1) => {
-    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) del(x, y, z);
-  };
-  const r = seededRng(4242);
-  for (let x = -HALF; x < HALF; x++) for (let z = -HALF; z < HALF; z++) {
-    let t = 'sand'; const v = r();
-    if (v < 0.05) t = 'gravel'; else if (v < 0.07) t = 'dirt';
-    set(x, 0, z, t);
-  }
-  for (let x = -HALF; x < HALF; x++) for (let z = -HALF; z < HALF; z++) {
-    const d = Math.hypot(x + 0.5, z + 0.5);
-    if (d >= 11 && d <= 12.8) set(x, 0, z, 'stone');
-  }
-  for (let x = 13; x <= 25; x++) for (let z = -1; z <= 1; z++) { set(x, 0, z, 'gravel'); set(-x - 1, 0, z, 'gravel'); }
-  for (let z = 13; z <= 27; z++) for (let x = -1; x <= 1; x++) { set(x, 0, z, 'gravel'); set(x, 0, -z - 1, 'gravel'); }
-  for (let i = -HALF - 1; i <= HALF; i++) for (let y = 0; y <= 5; y++) {
-    set(i, y, -HALF - 1, 'bedrock'); set(i, y, HALF, 'bedrock'); set(-HALF - 1, y, i, 'bedrock'); set(HALF, y, i, 'bedrock');
-  }
-  for (let y = 1; y <= 5; y++) { const B = 8 - y; for (let x = -B; x <= B; x++) for (let z = -B; z <= B; z++) set(x, y, z, y === 1 ? 'cobble' : (r() < 0.22 ? 'cobble' : 'sand')); }
-  carve(-3, 1, -3, 3, 3, 3); carve(-7, 1, -1, 7, 2, 1); carve(-1, 1, -7, 1, 2, 7); carve(0, 1, 0, 0, 5, 0);
-  [[-3, -3], [-3, 3], [3, -3], [3, 3], [0, 3], [0, -3], [3, 0], [-3, 0]].forEach(([x, z]) => { if (x || z) set(x, 6, z, 'cobble'); });
-  set(-2, 1, -2, 'planks'); set(2, 1, 2, 'planks'); set(2, 2, 2, 'planks'); set(-2, 1, 2, 'redWool'); set(2, 1, -2, 'blueWool');
-  const pillars = [[11, 4, 4], [11, -5, 3], [8, 9, 4], [8, -10, 2], [4, 11, 3], [4, -12, 4]];
-  pillars.forEach(([px, pz, h]) => { [[px, pz], [-px - 1, pz]].forEach(([x, z]) => { box(x, 1, z, x, h, z, 'cobble'); if (h >= 4) set(x, h + 1, z, 'leaves'); }); });
-  [[0, 18], [0, -19]].forEach(([tx, tz]) => {
-    const sz = tz > 0 ? 1 : -1;
-    box(tx - 1, 1, tz - 1, tx + 1, 4, tz + 1, 'bricks'); box(tx - 2, 5, tz - 2, tx + 2, 5, tz + 2, 'planks');
-    box(tx, 1, tz + 3 * sz, tx, 1, tz + 3 * sz, 'cobble'); box(tx, 1, tz + 2 * sz, tx, 2, tz + 2 * sz, 'cobble');
-    box(tx - 1, 1, tz + 2 * sz, tx - 1, 3, tz + 2 * sz, 'cobble'); box(tx - 1, 1, tz + 1 * sz, tx - 1, 4, tz + 1 * sz, 'cobble');
-  });
-  [[19, 20], [19, -21], [-20, 20], [-20, -21]].forEach(([ox, oz]) => {
-    for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) if (dx * dx + dz * dz <= 9 && r() < 0.85) set(ox + dx, 0, oz + dz, 'grass');
-    const palm = (px, pz, h) => { box(px, 1, pz, px, h, pz, 'log'); set(px + 1, h + 1, pz, 'leaves'); set(px - 1, h + 1, pz, 'leaves'); set(px, h + 1, pz + 1, 'leaves'); set(px, h + 1, pz - 1, 'leaves'); set(px, h + 2, pz, 'leaves'); };
-    palm(ox, oz, 4); palm(ox + 2, oz - 2, 3); set(ox - 2, 1, oz + 1, 'leaves'); set(ox + 1, 1, oz + 2, 'leaves');
-  });
-  for (let i = 0; i < 9; i++) {
-    const cx = 6 + Math.floor(r() * 14); const cz = Math.floor(r() * 52) - 26; const len = 3 + Math.floor(r() * 3); const alongX = r() < 0.5;
-    if (cx <= 9 && Math.abs(cz) <= 9) continue;
-    if (Math.abs(cz) >= 13 && Math.abs(cz) <= 16) continue;
-    const heights = Array.from({ length: len }, () => 1 + Math.floor(r() * 3));
-    heights.forEach((h, j) => { const bx = alongX ? cx + j : cx; const bz = alongX ? cz : cz + j; if (Math.abs(bx) > 24 || Math.abs(bz) > 29) return; box(bx, 1, bz, bx, h, bz, 'bricks'); box(-bx - 1, 1, bz, -bx - 1, h, bz, 'bricks'); });
-  }
-  for (let i = 0; i < 12; i++) {
-    const cx = 5 + Math.floor(r() * 18); const cz = Math.floor(r() * 54) - 27; if (Math.hypot(cx, cz) < 11) continue;
-    box(cx, 1, cz, cx + 1, 1, cz + 1, 'sand'); box(-cx - 2, 1, cz, -cx - 1, 1, cz + 1, 'sand');
-  }
+  const box = (x0, y0, z0, x1, y1, z1, type) => { for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) set(x, y, z, type); };
+  const carve = (x0, y0, z0, x1, y1, z1) => { for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) del(x, y, z); };
+  const r = seededRng(mapSeed(mapId));
+  for (let x = -HALF; x < HALF; x++) for (let z = -HALF; z < HALF; z++) { let t = style.ground; const v = r(); if (v < 0.05) t = style.speckle[0]; else if (v < 0.07) t = style.speckle[1]; set(x, 0, z, t); }
+  for (let i = -HALF - 1; i <= HALF; i++) for (let y = 0; y <= 5; y++) { set(i, y, -HALF - 1, 'bedrock'); set(i, y, HALF, 'bedrock'); set(-HALF - 1, y, i, 'bedrock'); set(HALF, y, i, 'bedrock'); }
+  buildCentre(mapId, style, r, { set, del, box, carve });
   for (let z = -12; z <= 12; z++) for (let x = 26; x <= 30; x++) { set(-x, 0, z, 'redWool'); set(x, 0, z, 'blueWool'); }
   for (let z = -9; z <= 9; z++) { if ((z + 9) % 4 === 3) continue; box(-24, 1, z, -24, 2, z, 'redWool'); box(23, 1, z, 23, 2, z, 'blueWool'); }
   [[-28, 'redWool'], [27, 'blueWool']].forEach(([bx, wool]) => { box(bx - 2, 1, -16, bx + 2, 3, -16, wool); box(bx - 2, 1, 16, bx + 2, 3, 16, wool); });
   return [...m.values()];
 }
 
-// Precompute a solid-voxel Set and a per-column ground height once.
-const SOLID = new Set();
-const GROUND = new Map(); // "x,z" -> highest solid y
-for (const b of buildMapBlocks()) {
-  SOLID.add(`${b.x},${b.y},${b.z}`);
-  const k = `${b.x},${b.z}`;
-  const cur = GROUND.get(k);
-  if (cur === undefined || b.y > cur) GROUND.set(k, b.y);
+// Build a room's solid-voxel Set + per-column ground height for its map.
+function buildRoomMap(mapId) {
+  const solid = new Set(), ground = new Map();
+  for (const b of buildMapBlocks(mapId)) {
+    solid.add(`${b.x},${b.y},${b.z}`);
+    const k = `${b.x},${b.z}`, cur = ground.get(k);
+    if (cur === undefined || b.y > cur) ground.set(k, b.y);
+  }
+  return { solid, ground };
 }
-const solid = (x, y, z) => SOLID.has(`${Math.floor(x)},${Math.floor(y)},${Math.floor(z)}`);
-const groundTop = (x, z) => { const v = GROUND.get(`${Math.floor(x)},${Math.floor(z)}`); return v === undefined ? -1 : v; };
-// Room-aware solidity: the static map, minus blocks players have destroyed, plus
-// blocks players have built. Bot line-of-sight must use this so player-built
-// cover actually blocks bot fire (bots were shooting through built walls).
+const groundTop = (r, x, z) => { const v = r.ground.get(`${Math.floor(x)},${Math.floor(z)}`); return v === undefined ? -1 : v; };
+// Room-aware solidity: the static map, minus destroyed, plus player-built blocks.
 function solidRoom(r, x, y, z) {
   const k = `${Math.floor(x)},${Math.floor(y)},${Math.floor(z)}`;
   if (r.placed.has(k)) return true;
   if (r.destroyed.has(k)) return false;
-  return SOLID.has(k);
+  return r.solid.has(k);
 }
-// true if the straight segment a->b is clear of solid voxels (bot line of sight)
 function losClear(r, ax, ay, az, bx, by, bz) {
   const dx = bx - ax, dy = by - ay, dz = bz - az;
   const dist = Math.hypot(dx, dy, dz);
   const steps = Math.ceil(dist / 0.34);
-  for (let i = 1; i < steps; i++) {
-    const t = i / steps;
-    if (solidRoom(r, ax + dx * t, ay + dy * t, az + dz * t)) return false;
-  }
+  for (let i = 1; i < steps; i++) { const t = i / steps; if (solidRoom(r, ax + dx * t, ay + dy * t, az + dz * t)) return false; }
   return true;
 }
 
@@ -151,16 +168,16 @@ const AGENTS = {
 };
 const agentOf = id => AGENTS[id] ? id : 'soldier';
 
-function spawnFor(team) {
+function spawnFor(r, team) {
   const z = Math.random() * 16 - 8;
   const x = team === 'red' ? -28 : 28;
-  return { x, y: groundTop(x, z) + 1.1, z };
+  return { x, y: groundTop(r, x, z) + 1.1, z };
 }
 function ryFor(team) { return team === 'red' ? -Math.PI / 2 : Math.PI / 2; }
 // CTF flag home positions (inside each base, within the no-build zone so they
 // can't be walled in). Each flag: home, current pos, carrier id, atHome, dropAt.
-function makeFlags() {
-  const z = 0, home = (x) => ({ x, y: groundTop(x, z) + 0.5, z });
+function makeFlags(r) {
+  const z = 0, home = (x) => ({ x, y: groundTop(r, x, z) + 0.5, z });
   const rh = home(-26), bh = home(26);
   return {
     red:  { home: rh, pos: { ...rh }, carrier: null, atHome: true, dropAt: 0 },
@@ -301,7 +318,8 @@ export class GameServer extends DurableObject {
   room(id) {
     let r = this.rooms.get(id);
     if (!r) {
-      r = { id, clients: new Map(), bots: new Map(), scores: { red: 0, blue: 0 }, placed: new Map(), destroyed: new Map(), over: false, diff: 'normal', mode: 'dm', flags: null, map: 'desert' };
+      const map = randomMap(); // maps are random, not player-chosen
+      r = { id, clients: new Map(), bots: new Map(), scores: { red: 0, blue: 0 }, placed: new Map(), destroyed: new Map(), over: false, mode: 'dm', flags: null, map, ...buildRoomMap(map) };
       this.rooms.set(id, r);
     }
     return r;
@@ -387,18 +405,17 @@ export class GameServer extends DurableObject {
     const id = this.nextId++;
     const team = this.pickTeam(r);
     const name = String(m.name || 'Player').slice(0, 16) || 'Player';
-    const pos = spawnFor(team);
+    const pos = spawnFor(r, team);
     const agent = agentOf(m.agent);
     const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, lastHit: 0, level: 0,
       acct: m.acct ? String(m.acct).toLowerCase().slice(0, 16) : null,
       agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.clients.set(id, { ws, player });
-    // First player in a room sets the bot difficulty AND the game mode for it.
+    // First player in a room sets only the game mode; the map is random (set at
+    // room creation) and bot difficulty is mixed per-bot.
     if (r.clients.size === 1) {
-      if (['easy', 'normal', 'hard'].includes(m.diff)) r.diff = m.diff;
-      if (m.mode === 'ctf') { r.mode = 'ctf'; r.flags = makeFlags(); }
+      if (m.mode === 'ctf') { r.mode = 'ctf'; r.flags = makeFlags(r); }
       else if (m.mode === 'gg') { r.mode = 'gg'; }
-      if (['desert', 'arctic', 'volcano', 'night', 'metro', 'toxic'].includes(m.map)) r.map = m.map;
     }
 
     this.send(ws, {
@@ -452,7 +469,7 @@ export class GameServer extends DurableObject {
         break;
       }
       case 'respawn':
-        p.alive = true; p.hp = 100; p.pos = spawnFor(p.team); p.ry = ryFor(p.team); p.rx = 0;
+        p.alive = true; p.hp = 100; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); p.rx = 0;
         this.broadcast(r, { t: 'respawn', id: p.id, pos: p.pos });
         break;
       case 'rtc': {
@@ -538,7 +555,7 @@ export class GameServer extends DurableObject {
       const f = r.flags[t];
       if (f.carrier === ent.id) {
         f.carrier = null; f.atHome = false; f.dropAt = Date.now();
-        f.pos = { x: ent.pos.x, y: groundTop(ent.pos.x, ent.pos.z) + 0.5, z: ent.pos.z };
+        f.pos = { x: ent.pos.x, y: groundTop(r, ent.pos.x, ent.pos.z) + 0.5, z: ent.pos.z };
         this.broadcast(r, { t: 'flag', ev: 'drop', team: t });
       }
     }
@@ -593,9 +610,9 @@ export class GameServer extends DurableObject {
     r.over = false;
     r.scores = { red: 0, blue: 0 };
     r.placed.clear(); r.destroyed.clear();
-    if (r.mode === 'ctf') r.flags = makeFlags();
-    for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.level = 0; p.pos = spawnFor(p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
-    for (const b of r.bots.values()) { b.hp = 100; b.alive = true; b.kills = 0; b.deaths = 0; b.level = 0; b.pos = spawnFor(b.team); b.ry = ryFor(b.team); this.broadcast(r, { t: 'respawn', id: b.id, pos: b.pos }); }
+    if (r.mode === 'ctf') r.flags = makeFlags(r);
+    for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.level = 0; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
+    for (const b of r.bots.values()) { b.hp = 100; b.alive = true; b.kills = 0; b.deaths = 0; b.level = 0; b.pos = spawnFor(r, b.team); b.ry = ryFor(b.team); this.broadcast(r, { t: 'respawn', id: b.id, pos: b.pos }); }
     this.broadcast(r, { t: 'scores', scores: r.scores });
     this.broadcast(r, { t: 'matchstart', scores: r.scores });
   }
@@ -640,8 +657,10 @@ export class GameServer extends DurableObject {
     let nm;
     if (free.length) nm = free[Math.floor(Math.random() * free.length)];
     else { let i = 2; do { nm = CFG.botNames[Math.floor(Math.random() * CFG.botNames.length)] + ' ' + i++; } while (used.has(nm)); }
-    const pos = spawnFor(team);
-    const skill = SKILL[r.diff] || SKILL.normal;
+    const pos = spawnFor(r, team);
+    // Mixed difficulty: each bot rolls its own tier (some easy, some hard).
+    const tier = ['easy', 'easy', 'normal', 'normal', 'normal', 'hard'][Math.floor(Math.random() * 6)];
+    const skill = SKILL[tier];
     const agent = Object.keys(AGENTS)[Math.floor(Math.random() * Object.keys(AGENTS).length)];
     const bot = { id, name: nm, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, level: 0, bot: true, nextShot: 0, wander: Math.random() * Math.PI * 2, repick: 0, respawnAt: 0, skill: skill.min + Math.random() * skill.span, lastHit: 0, agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.bots.set(id, bot);
@@ -653,7 +672,7 @@ export class GameServer extends DurableObject {
     if (r.over) return;
     for (const bot of r.bots.values()) {
       if (!bot.alive) {
-        if (now >= bot.respawnAt) { bot.alive = true; bot.hp = 100; bot.pos = spawnFor(bot.team); this.broadcast(r, { t: 'respawn', id: bot.id, pos: bot.pos }); }
+        if (now >= bot.respawnAt) { bot.alive = true; bot.hp = 100; bot.pos = spawnFor(r, bot.team); this.broadcast(r, { t: 'respawn', id: bot.id, pos: bot.pos }); }
         continue;
       }
       let target = null, best = Infinity;
@@ -699,7 +718,7 @@ export class GameServer extends DurableObject {
       const nx = clampArena(bot.pos.x - Math.sin(a) * step);
       const nz = clampArena(bot.pos.z - Math.cos(a) * step);
       if (nx === bot.pos.x && nz === bot.pos.z) continue; // clamped at arena edge
-      const destFeet = groundTop(nx, nz) + 1;
+      const destFeet = groundTop(r, nx, nz) + 1;
       if (destFeet - bot.pos.y > 1.25) continue;          // wall too tall this way
       if (bot.pos.y - destFeet > 4) continue;             // don't walk off big drops
       bot.pos.x = nx; bot.pos.z = nz; bot.pos.y = destFeet;
@@ -724,7 +743,7 @@ export class GameServer extends DurableObject {
         if (!r.over) for (const c of r.clients.values()) {
           const p = c.player;
           if (!p.alive && p.respawnAt && now >= p.respawnAt) {
-            p.alive = true; p.hp = 100; p.pos = spawnFor(p.team); p.ry = ryFor(p.team); p.respawnAt = 0;
+            p.alive = true; p.hp = 100; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); p.respawnAt = 0;
             this.broadcast(r, { t: 'respawn', id: p.id, pos: p.pos });
           }
         }

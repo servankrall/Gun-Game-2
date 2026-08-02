@@ -384,21 +384,7 @@
 
     <div id="bottombar">
       <div class="bside">
-        <label class="practice">PRACTICE
-          <select id="diffSel" title="Bot difficulty">
-            <option value="easy">BOTS: EASY</option>
-            <option value="normal" selected>BOTS: NORMAL</option>
-            <option value="hard">BOTS: HARD</option>
-          </select>
-          <select id="mapSel" title="Map">
-            <option value="desert" selected>MAP: DESERT</option>
-            <option value="arctic">MAP: ARCTIC</option>
-            <option value="volcano">MAP: VOLCANO</option>
-            <option value="night">MAP: NIGHT</option>
-            <option value="metro">MAP: METRO</option>
-            <option value="toxic">MAP: TOXIC</option>
-          </select>
-        </label>
+        <div class="practice">RANDOM MAP &amp; MIXED BOTS</div>
       </div>
       <div class="bmid">
         <button id="playBtn" class="playbtn">PLAY</button>
@@ -484,6 +470,7 @@
     <div id="matchOver">
       <div class="t" id="matchOverTitle">RED TEAM WINS</div>
       <div class="s" id="matchOverSub"></div>
+      <button class="mc-btn" id="menuBtnOver">MAIN MENU</button>
     </div>
     <div id="killfeed"></div>
     <div id="hearts"></div>
@@ -491,7 +478,7 @@
     <div id="ammo">
       <div class="num" id="ammoNum">30 / 30</div>
       <div class="wname" id="weaponName">RIFLE</div>
-      <div class="wname" id="nadeHud">🧨 x3 <span style="color:#888">[G]</span></div>
+      <div class="wname" id="nadeHud">NADE x3 <span style="color:#888">[G]</span></div>
       <div class="rel" id="reloadLbl">RELOADING...</div>
     </div>
     <div id="deathScreen">
@@ -504,6 +491,7 @@
       <div class="t">PAUSED</div>
       <div class="c">LMB — fire · RMB — aim (sniper)<br>R — reload · 1 rifle · 2 shotgun · 3 sniper<br>4 blocks · 5 pickaxe · 6 bazooka<br>TAB — scoreboard · T — chat · V (hold) — voice</div>
       <button class="mc-btn" id="resumeBtn">BACK TO GAME</button>
+      <button class="mc-btn" id="menuBtnPause">MAIN MENU</button>
     </div>
     <div id="respawnFlash"></div>
     <div id="chat">
