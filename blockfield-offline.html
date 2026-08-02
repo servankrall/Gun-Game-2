@@ -121,6 +121,24 @@
   #friendsList .fbtns { display: flex; gap: 4px; }
   #friendsList .fjoin { background: #49c26a; color: #04210f; border: 2px solid #000; font-family: inherit; font-size: 8px; padding: 4px 7px; cursor: pointer; }
   #friendsList .fdel { background: transparent; color: #ff6a6a; border: none; font-size: 11px; cursor: pointer; }
+  .dailymsg { color: #ffd24a; font-size: 8px; text-align: center; min-height: 10px; }
+  #friendRequests { display: flex; flex-direction: column; gap: 5px; }
+  #friendRequests .freqh { color: #ffd24a; font-size: 8px; letter-spacing: 1px; margin-top: 2px; }
+  #friendRequests .frow { display: flex; align-items: center; gap: 8px; font-size: 9px; color: #fff; background: rgba(255,210,74,.1); padding: 6px 8px; }
+  #friendRequests .frow .fname { flex: 1; }
+  #friendRequests .fjoin { background: #49c26a; color: #04210f; border: 2px solid #000; font-family: inherit; font-size: 9px; padding: 4px 8px; cursor: pointer; }
+  #friendRequests .fdel { background: transparent; color: #ff6a6a; border: none; font-size: 11px; cursor: pointer; }
+  #leaderPanel { display: none; flex-direction: column; gap: 6px; width: min(420px, 92vw); margin: 8px auto 0;
+    background: rgba(6,14,30,.72); border: 2px solid #2a3a5c; padding: 12px; }
+  #leaderPanel.open { display: flex; }
+  #leaderPanel .ltitle { color: #cfd6e6; font-size: 9px; letter-spacing: 1px; text-align: center; }
+  #leaderList { display: flex; flex-direction: column; gap: 4px; }
+  #leaderList .fempty { color: #8090ad; font-size: 8px; text-align: center; padding: 6px; }
+  #leaderList .lrow { display: flex; align-items: center; gap: 10px; font-size: 9px; color: #cfd6e6; background: rgba(255,255,255,.05); padding: 6px 8px; }
+  #leaderList .lrank { color: #ffd24a; width: 16px; }
+  #leaderList .lname { flex: 1; color: #fff; }
+  #leaderList .lwin { color: #49c26a; }
+  #leaderList .lco { color: #ffd24a; }
   #menu .ver { position: absolute; left: 8px; bottom: 6px; color: #5d6a86; font-size: 8px; }
   #menu .credit { position: absolute; right: 8px; bottom: 6px; color: #8090ad; font-size: 8px; text-shadow: 1px 1px 0 #000; }
   @media (max-width: 760px) { .hide-sm { display: none; } #agentCard { width: 210px; height: 350px; } .pslot { height: 300px; } }
@@ -390,6 +408,9 @@
         <button id="inviteBtn" class="linkbtn">⧉ INVITE FRIENDS</button>
         <button id="friendsBtn" class="linkbtn">👥 FRIENDS</button>
         <button id="authBtn" class="linkbtn">👤 ACCOUNT</button>
+        <button id="leaderBtn" class="linkbtn">🏆 LEADERBOARD</button>
+        <button id="dailyBtn" class="linkbtn">🎁 DAILY +100</button>
+        <div id="dailyMsg" class="dailymsg"></div>
       </div>
     </div>
 
@@ -411,8 +432,15 @@
 
     <div id="friendsPanel">
       <div class="fcode">YOUR CODE: <b id="myCode">------</b> <button id="copyCodeBtn" class="fcopy">COPY</button></div>
-      <div class="fadd"><input id="friendCodeInput" maxlength="12" placeholder="Friend code" autocomplete="off"><button id="friendAddBtn">ADD</button></div>
+      <div class="fadd"><input id="friendCodeInput" maxlength="16" placeholder="Friend code / username" autocomplete="off"><button id="friendAddBtn">ADD</button></div>
+      <div id="friendMsg" class="dailymsg"></div>
+      <div id="friendRequests"></div>
       <div id="friendsList"></div>
+    </div>
+
+    <div id="leaderPanel">
+      <div class="ltitle">🏆 LEADERBOARD <span class="asub">(top by wins, then coins)</span></div>
+      <div id="leaderList"></div>
     </div>
 
     <div id="optPanel">
@@ -475,7 +503,7 @@
     <div id="respawnFlash"></div>
     <div id="chat">
       <div id="chatMessages"></div>
-      <input id="chatInput" maxlength="120" placeholder="Message... (Enter — send, Esc — close)" autocomplete="off">
+      <input id="chatInput" maxlength="120" placeholder="Message…  /w &lt;name&gt; &lt;msg&gt; to whisper  (Enter send · Esc close)" autocomplete="off">
     </div>
     <div id="voiceInd"><div class="dot"></div><span>MICROPHONE ON</span></div>
     <div id="touch">
@@ -694,18 +722,19 @@ class GameServer {
   }
 
   // ---- friend presence (pid = a persistent client id sent at hello/join) ----
-  presenceOnline(pid, name, room, conn) {
+  presenceOnline(pid, name, room, ws) {
     let e = this.online.get(pid);
     if (!e) { e = { name, room, socks: new Set() }; this.online.set(pid, e); }
-    e.name = name || e.name; e.room = room; e.socks.add(conn);
+    e.name = name || e.name; e.room = room; e.socks.add(ws);
   }
-  presenceOffline(pid, conn) {
+  presenceOffline(pid, ws) {
     const e = this.online.get(pid); if (!e) return;
-    e.socks.delete(conn); if (!e.socks.size) this.online.delete(pid);
+    e.socks.delete(ws); if (!e.socks.size) this.online.delete(pid);
   }
+  pushToUser(user, obj) { const e = this.online.get(String(user).toLowerCase()); if (!e) return; for (const ws of e.socks) this.send(ws, obj); }
   presenceQuery(pids) {
     const out = {};
-    for (const pid of pids) { const e = this.online.get(pid); if (e) out[pid] = { name: e.name, room: e.room }; }
+    for (const pid of pids) { const k = String(pid).toLowerCase(); const e = this.online.get(k); if (e) out[pid] = { name: e.name, room: e.room }; }
     return out;
   }
 
@@ -722,14 +751,18 @@ class GameServer {
     let h = 5381; for (let i = 0; i < msg.length; i++) h = ((h << 5) + h + msg.charCodeAt(i)) | 0; // fallback (non-secure ctx)
     return 'x' + (h >>> 0).toString(16);
   }
-  profileOf(a) { return { coins: a.coins || 0, unlocked: a.unlocked || ['soldier'], friends: a.friends || [] }; }
+  profileOf(a) { return { coins: a.coins || 0, unlocked: a.unlocked || ['soldier'], friends: a.friends || [], wins: a.wins || 0, requests: a.requests || [], lastDaily: a.lastDaily || 0 }; }
+  async _list(prefix) { // works for DO storage and the in-memory offline fallback
+    if (this.ctx?.storage) { const map = await this.ctx.storage.list({ prefix }); return [...map.values()]; }
+    this._mem ||= new Map(); const out = []; for (const [k, v] of this._mem) if (k.startsWith(prefix)) out.push(v); return out;
+  }
   async register(user, pass) {
     user = String(user || '').trim().toLowerCase().slice(0, 16);
     if (!/^[a-z0-9_]{3,16}$/.test(user)) return { ok: false, error: 'Username: 3-16 letters/numbers/_' };
     if (String(pass || '').length < 4) return { ok: false, error: 'Password too short (min 4)' };
     if (await this._get('acct:' + user)) return { ok: false, error: 'Username taken' };
     const salt = this.randHex(8);
-    const acct = { user, salt, hash: await this.hashPass(pass, salt), coins: 0, unlocked: ['soldier'], friends: [] };
+    const acct = { user, salt, hash: await this.hashPass(pass, salt), coins: 0, unlocked: ['soldier'], friends: [], requests: [], wins: 0, lastDaily: 0 };
     await this._put('acct:' + user, acct);
     const token = this.randHex(16); await this._put('tok:' + token, user);
     return { ok: true, user, token, profile: this.profileOf(acct) };
@@ -751,6 +784,61 @@ class GameServer {
     if (Array.isArray(friends)) acct.friends = friends.slice(0, 200);
     await this._put('acct:' + user, acct);
   }
+  async userByToken(token) { return (await this._get('tok:' + String(token || ''))) || null; }
+  async friendRequest(token, to) {
+    const from = await this.userByToken(token); if (!from) return { ok: false, error: 'log in first' };
+    to = String(to || '').trim().toLowerCase().slice(0, 16);
+    if (!to || to === from) return { ok: false, error: 'invalid user' };
+    const tAcct = await this._get('acct:' + to); if (!tAcct) return { ok: false, error: 'no such user' };
+    const fAcct = await this._get('acct:' + from);
+    if ((fAcct.friends || []).includes(to)) return { ok: false, error: 'already friends' };
+    tAcct.requests = tAcct.requests || [];
+    if (!tAcct.requests.includes(from)) { tAcct.requests.push(from); await this._put('acct:' + to, tAcct); }
+    this.pushToUser(to, { t: 'friend_req_in', from });
+    return { ok: true, to };
+  }
+  async friendAccept(token, from) {
+    const me = await this.userByToken(token); if (!me) return { ok: false };
+    from = String(from || '').toLowerCase().slice(0, 16);
+    const meAcct = await this._get('acct:' + me), fAcct = await this._get('acct:' + from);
+    if (!meAcct || !fAcct) return { ok: false };
+    meAcct.requests = (meAcct.requests || []).filter(x => x !== from);
+    meAcct.friends = meAcct.friends || []; if (!meAcct.friends.includes(from)) meAcct.friends.push(from);
+    fAcct.friends = fAcct.friends || []; if (!fAcct.friends.includes(me)) fAcct.friends.push(me);
+    await this._put('acct:' + me, meAcct); await this._put('acct:' + from, fAcct);
+    this.pushToUser(from, { t: 'friend_added', user: me });
+    return { ok: true, friends: meAcct.friends, requests: meAcct.requests };
+  }
+  async friendDecline(token, from) {
+    const me = await this.userByToken(token); if (!me) return { ok: false };
+    from = String(from || '').toLowerCase().slice(0, 16);
+    const meAcct = await this._get('acct:' + me); if (!meAcct) return { ok: false };
+    meAcct.requests = (meAcct.requests || []).filter(x => x !== from);
+    await this._put('acct:' + me, meAcct);
+    return { ok: true, friends: meAcct.friends || [], requests: meAcct.requests };
+  }
+  async dailyClaim(token) {
+    const user = await this.userByToken(token); if (!user) return { ok: false, error: 'log in to claim' };
+    const acct = await this._get('acct:' + user); if (!acct) return { ok: false };
+    const now = Date.now(), DAY = 86400000;
+    if (now - (acct.lastDaily || 0) < DAY) return { ok: false, error: 'already claimed today', next: (acct.lastDaily || 0) + DAY };
+    const reward = 100;
+    acct.coins = (acct.coins || 0) + reward; acct.lastDaily = now;
+    await this._put('acct:' + user, acct);
+    return { ok: true, reward, coins: acct.coins };
+  }
+  async leaderboard() {
+    const accts = await this._list('acct:');
+    return accts.map(a => ({ user: a.user, wins: a.wins || 0, coins: a.coins || 0 }))
+      .sort((x, y) => (y.wins - x.wins) || (y.coins - x.coins)).slice(0, 10);
+  }
+  awardWins(r, winnerTeam, winnerName) {
+    for (const c of r.clients.values()) {
+      const p = c.player; if (!p.acct) continue;
+      const won = winnerName ? (p.name === winnerName) : (p.team === winnerTeam);
+      if (won) this._get('acct:' + p.acct).then(a => { if (a) { a.wins = (a.wins || 0) + 1; this._put('acct:' + p.acct, a); } }).catch(() => {});
+    }
+  }
 
   room(id) {
     let r = this.rooms.get(id);
@@ -762,12 +850,12 @@ class GameServer {
   }
 
   onConnect(ws) {
-    let id = null, roomId = null, pid = null; const conn = {};
+    let id = null, roomId = null, pid = null;
     ws.addEventListener('message', ev => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.t === 'hello') { // lobby presence (menu, no game join)
-        pid = String(m.pid || '').toUpperCase().slice(0, 12) || null;
-        if (pid) this.presenceOnline(pid, String(m.name || 'Player').slice(0, 16), 'lobby', conn);
+        pid = String(m.pid || '').toLowerCase().slice(0, 16) || null;
+        if (pid) this.presenceOnline(pid, String(m.name || 'Player').slice(0, 16), 'lobby', ws);
         return;
       }
       if (m.t === 'presence_req') {
@@ -788,12 +876,17 @@ class GameServer {
         return;
       }
       if (m.t === 'acct_save') { this.saveProfile(m.token, m.coins, m.unlocked, m.friends); return; }
+      if (m.t === 'friend_request') { this.friendRequest(m.token, m.to).then(r => this.send(ws, { t: 'friend_request_res', ...r })).catch(() => {}); return; }
+      if (m.t === 'friend_accept') { this.friendAccept(m.token, m.from).then(r => this.send(ws, { t: 'friend_update', ...r })).catch(() => {}); return; }
+      if (m.t === 'friend_decline') { this.friendDecline(m.token, m.from).then(r => this.send(ws, { t: 'friend_update', ...r })).catch(() => {}); return; }
+      if (m.t === 'daily_claim') { this.dailyClaim(m.token).then(r => this.send(ws, { t: 'daily', ...r })).catch(() => {}); return; }
+      if (m.t === 'leaderboard') { this.leaderboard().then(list => this.send(ws, { t: 'leaderboard', list })).catch(() => {}); return; }
       if (m.t === 'join') {
         if (id !== null) return;
         roomId = String(m.room || 'pub').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'pub';
-        pid = String(m.pid || pid || '').toUpperCase().slice(0, 12) || null;
+        pid = String(m.pid || pid || '').toLowerCase().slice(0, 16) || null;
         id = this.handleJoin(ws, m, roomId);
-        if (pid) this.presenceOnline(pid, String(m.name || 'Player').slice(0, 16), roomId, conn);
+        if (pid) this.presenceOnline(pid, String(m.name || 'Player').slice(0, 16), roomId, ws);
         return;
       }
       if (id === null) return;
@@ -801,7 +894,7 @@ class GameServer {
     });
     const bye = () => {
       if (id !== null) { this.handleLeave(roomId, id); id = null; }
-      if (pid) { this.presenceOffline(pid, conn); }
+      if (pid) { this.presenceOffline(pid, ws); }
     };
     ws.addEventListener('close', bye);
     ws.addEventListener('error', bye);
@@ -829,6 +922,7 @@ class GameServer {
     const pos = spawnFor(team);
     const agent = agentOf(m.agent);
     const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, lastHit: 0, level: 0,
+      acct: m.acct ? String(m.acct).toLowerCase().slice(0, 16) : null,
       agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.clients.set(id, { ws, player });
     // First player in a room sets the bot difficulty AND the game mode for it.
@@ -901,6 +995,15 @@ class GameServer {
       case 'chat': {
         const text = String(m.text || '').slice(0, 120);
         if (text) this.broadcast(r, { t: 'chat', name: p.name, team: p.team, text });
+        break;
+      }
+      case 'whisper': { // private message to one player by name (/w name msg)
+        const to = String(m.to || '').slice(0, 16), text = String(m.text || '').slice(0, 120);
+        if (!text) break;
+        const tgt = [...r.clients.values()].find(x => x.player.name.toLowerCase() === to.toLowerCase());
+        if (!tgt) { this.send(c.ws, { t: 'chat', name: '*', team: p.team, text: `no player "${to}" here`, whisper: true }); break; }
+        this.send(tgt.ws, { t: 'chat', name: p.name + ' →you', team: p.team, text, whisper: true });
+        this.send(c.ws, { t: 'chat', name: 'you→ ' + tgt.player.name, team: p.team, text, whisper: true });
         break;
       }
       case 'ping':
@@ -1013,6 +1116,7 @@ class GameServer {
 
   endMatch(r, winner, winnerName) {
     r.over = true;
+    this.awardWins(r, winner, winnerName); // +1 win on the leaderboard for logged-in winners
     this.broadcast(r, { t: 'matchover', winner, winnerName: winnerName || null, scores: r.scores });
     setTimeout(() => this.resetMatch(r), 6000);
   }
@@ -1653,18 +1757,23 @@ let menuRefresh = null; // set by setupMenu so auth changes can refresh the menu
 // ---- account (optional login; syncs coins/unlocks/friends across devices) ----
 let account = null; // { user, token } when logged in
 let authToken = localStorage.getItem('bf_token') || null;
+let pendingRequests = [];   // incoming friend requests (account mode)
 let syncTimer = null;
 function presenceId() { return account ? account.user : myPid; }
-// Push the current profile to the server (debounced) when logged in.
+// Send a message over whichever socket is live (game in-game, else lobby).
+function authSend(obj) {
+  const s = JSON.stringify(obj);
+  if (ws && ws.readyState === 1) ws.send(s);
+  else if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(s);
+  else { connectLobby(); setTimeout(() => { if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(s); }, 400); }
+}
+// Push coins + unlocks to the server (debounced) when logged in. Friends are
+// managed server-side via requests/accept, so they're not sent here.
 function syncAccount() {
   if (!account) return;
-  const payload = JSON.stringify({ t: 'acct_save', token: account.token, coins, unlocked: [...unlocked], friends });
+  const payload = JSON.stringify({ t: 'acct_save', token: account.token, coins, unlocked: [...unlocked] });
   clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => {
-    if (ws && ws.readyState === 1) ws.send(payload);
-    else if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(payload);
-    else { connectLobby(); setTimeout(() => { if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(payload); }, 500); }
-  }, 400);
+  syncTimer = setTimeout(() => authSend(JSON.parse(payload)), 400);
 }
 let myAgent = (AGENTS[localStorage.getItem('blockade_agent')] && isUnlocked(localStorage.getItem('blockade_agent'))) ? localStorage.getItem('blockade_agent') : 'soldier';
 const hex6 = n => '#' + n.toString(16).padStart(6, '0');
@@ -1931,8 +2040,20 @@ function setupMenu() {
   if (fin) fin.addEventListener('keydown', e => { if (e.key === 'Enter') { addFriend(fin.value); fin.value = ''; } });
   const cc = $('copyCodeBtn');
   if (cc) cc.addEventListener('click', () => {
-    if (navigator.clipboard) navigator.clipboard.writeText(myPid).then(() => { cc.textContent = 'COPIED ✓'; setTimeout(() => cc.textContent = 'COPY', 1400); }).catch(() => {});
+    if (navigator.clipboard) navigator.clipboard.writeText(presenceId()).then(() => { cc.textContent = 'COPIED ✓'; setTimeout(() => cc.textContent = 'COPY', 1400); }).catch(() => {});
   });
+  renderRequests();
+
+  // ---- daily reward ----
+  const db = $('dailyBtn');
+  if (db) db.addEventListener('click', () => {
+    if (!account) { $('dailyMsg') && ($('dailyMsg').textContent = 'Log in to claim daily coins'); return; }
+    authSend({ t: 'daily_claim', token: account.token });
+  });
+
+  // ---- leaderboard ----
+  const lb = $('leaderBtn');
+  if (lb) lb.addEventListener('click', () => { $('leaderPanel').classList.toggle('open'); connectLobby(); authSend({ t: 'leaderboard' }); });
 }
 
 // ============================================================
@@ -1951,11 +2072,7 @@ function connectLobby() {
     lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: (account ? account.user : (localStorage.getItem('blockade_name') || 'Player')) }));
     requestPresence();
   };
-  lobbyWs.onmessage = e => {
-    let m; try { m = JSON.parse(e.data); } catch { return; }
-    if (m.t === 'presence') { presenceCache = m.online || {}; renderFriends(); }
-    else if (m.t === 'auth') onAuth(m);
-  };
+  lobbyWs.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } handleAccountMsg(m); };
   lobbyWs.onclose = () => { lobbyWs = null; };
   if (!lobbyTimer) lobbyTimer = setInterval(requestPresence, 4000);
 }
@@ -1967,12 +2084,69 @@ function closeLobby() {
   if (lobbyWs) { try { lobbyWs.close(); } catch {} lobbyWs = null; }
 }
 function addFriend(code, name) {
-  code = String(code || '').trim().toUpperCase().slice(0, 12);
-  if (!code || code === myPid || friends.some(f => f.code === code)) return;
+  code = String(code || '').trim().toLowerCase().slice(0, 16);
+  if (!code || code === presenceId().toLowerCase()) return;
+  if (account) { // logged in → send a friend request (needs mutual accept)
+    authSend({ t: 'friend_request', token: account.token, to: code });
+    const fm = $('friendMsg'); if (fm) fm.textContent = 'Request sent to ' + code + '…';
+    return;
+  }
+  if (friends.some(f => f.code === code)) return;
   friends.push({ code, name: String(name || '').trim().slice(0, 16) || code });
   saveFriends(); renderFriends(); requestPresence();
 }
-function removeFriend(code) { friends = friends.filter(f => f.code !== code); saveFriends(); renderFriends(); }
+function removeFriend(code) {
+  if (account) { authSend({ t: 'friend_remove', token: account.token, from: code }); return; }
+  friends = friends.filter(f => f.code !== code); saveFriends(); renderFriends();
+}
+function renderRequests() {
+  const box = $('friendRequests'); if (!box) return;
+  box.innerHTML = '';
+  if (!account || !pendingRequests.length) return;
+  const h = document.createElement('div'); h.className = 'freqh'; h.textContent = 'FRIEND REQUESTS'; box.appendChild(h);
+  for (const from of pendingRequests) {
+    const row = document.createElement('div'); row.className = 'frow';
+    const nm = document.createElement('span'); nm.className = 'fname'; nm.textContent = from; row.appendChild(nm);
+    const btns = document.createElement('span'); btns.className = 'fbtns';
+    const a = document.createElement('button'); a.textContent = '✓'; a.className = 'fjoin'; a.title = 'Accept';
+    a.addEventListener('click', () => authSend({ t: 'friend_accept', token: account.token, from })); btns.appendChild(a);
+    const d = document.createElement('button'); d.textContent = '✕'; d.className = 'fdel'; d.title = 'Decline';
+    d.addEventListener('click', () => authSend({ t: 'friend_decline', token: account.token, from })); btns.appendChild(d);
+    row.appendChild(btns); box.appendChild(row);
+  }
+}
+function onDaily(m) {
+  const el = $('dailyMsg');
+  if (m.ok) { coins = m.coins; const cb = $('coinBal'); if (cb) cb.textContent = '🪙 ' + coins; if (el) el.textContent = '+' + m.reward + ' 🪙 claimed!'; }
+  else if (el) { el.textContent = m.error || 'not available'; if (m.next) { const h = Math.max(0, Math.ceil((m.next - Date.now()) / 3600000)); el.textContent += ' (~' + h + 'h)'; } }
+}
+function renderLeaderboard(list) {
+  const box = $('leaderList'); if (!box) return;
+  box.innerHTML = '';
+  if (!list.length) { box.innerHTML = '<div class="fempty">No players yet.</div>'; return; }
+  list.forEach((e, i) => {
+    const row = document.createElement('div'); row.className = 'lrow';
+    row.innerHTML = `<span class="lrank">${i + 1}</span><span class="lname">${e.user}</span><span class="lwin">${e.wins} W</span><span class="lco">${e.coins} 🪙</span>`;
+    box.appendChild(row);
+  });
+}
+// Account/social messages that can arrive on either socket.
+function handleAccountMsg(m) {
+  switch (m.t) {
+    case 'auth': onAuth(m); return true;
+    case 'presence': presenceCache = m.online || {}; renderFriends(); return true;
+    case 'friend_request_res': { const fm = $('friendMsg'); if (fm) fm.textContent = m.ok ? ('Request sent to ' + m.to) : (m.error || 'failed'); return true; }
+    case 'friend_req_in': if (!pendingRequests.includes(m.from)) pendingRequests.push(m.from); renderRequests(); { const fm = $('friendMsg'); if (fm) fm.textContent = 'New request from ' + m.from; } return true;
+    case 'friend_added': if (!friends.some(f => f.code === m.user)) friends.push({ code: m.user, name: m.user }); renderFriends(); requestPresence(); return true;
+    case 'friend_update':
+      if (Array.isArray(m.friends)) friends = m.friends.map(u => ({ code: u, name: u }));
+      if (Array.isArray(m.requests)) pendingRequests = m.requests;
+      renderFriends(); renderRequests(); requestPresence(); return true;
+    case 'daily': onDaily(m); return true;
+    case 'leaderboard': renderLeaderboard(m.list || []); return true;
+  }
+  return false;
+}
 function joinFriend(room) {
   const nm = ($('nameInput').value || '').trim() || localStorage.getItem('blockade_name') || '';
   if (nm.length < 2) { $('menuErr').textContent = 'Enter a nickname first!'; return; }
@@ -1983,7 +2157,7 @@ function joinFriend(room) {
   connect(nm);
 }
 function renderFriends() {
-  const codeEl = $('myCode'); if (codeEl) codeEl.textContent = myPid;
+  const codeEl = $('myCode'); if (codeEl) codeEl.textContent = presenceId();
   const list = $('friendsList'); if (!list) return;
   list.innerHTML = '';
   if (!friends.length) { list.innerHTML = '<div class="fempty">No friends yet — share your code and add theirs.</div>'; return; }
@@ -2009,11 +2183,12 @@ function onAuth(m) {
     const pr = m.profile || {};
     coins = pr.coins || 0;
     unlocked = new Set((pr.unlocked && pr.unlocked.length) ? pr.unlocked : ['soldier']); unlocked.add('soldier');
-    friends = Array.isArray(pr.friends) ? pr.friends : [];
+    friends = Array.isArray(pr.friends) ? pr.friends.map(u => ({ code: u, name: u })) : [];
+    pendingRequests = Array.isArray(pr.requests) ? pr.requests : [];
     if (!isUnlocked(myAgent)) { myAgent = 'soldier'; localStorage.setItem('blockade_agent', 'soldier'); }
     if (msg) msg.textContent = '';
     if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: m.user }));
-    renderAuth(); if (menuRefresh) menuRefresh(); requestPresence();
+    renderAuth(); renderRequests(); if (menuRefresh) menuRefresh(); requestPresence();
   } else if (msg) { msg.textContent = m.error || 'Auth failed'; }
 }
 function doAuth(kind) {
@@ -2035,9 +2210,10 @@ function logout() {
   try { const u = JSON.parse(localStorage.getItem('bf_unlocked')); unlocked = new Set(Array.isArray(u) ? u : ['soldier']); } catch { unlocked = new Set(['soldier']); }
   unlocked.add('soldier');
   try { const f = JSON.parse(localStorage.getItem('bf_friends')); friends = Array.isArray(f) ? f : []; } catch { friends = []; }
+  pendingRequests = [];
   if (!isUnlocked(myAgent)) { myAgent = 'soldier'; localStorage.setItem('blockade_agent', 'soldier'); }
   if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: (localStorage.getItem('blockade_name') || 'Player') }));
-  renderAuth(); if (menuRefresh) menuRefresh(); requestPresence();
+  renderAuth(); renderRequests(); if (menuRefresh) menuRefresh(); requestPresence();
 }
 function renderAuth() {
   const inEl = $('authLoggedOut'), outEl = $('authLoggedIn');
@@ -2056,7 +2232,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId() }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId(), acct: account ? account.user : null }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -2263,7 +2439,7 @@ function handleMsg(m) {
       $('scoreBlue').textContent = scores.blue;
       break;
     case 'chat':
-      addChatMessage(m.name, m.team, m.text);
+      addChatMessage(m.name, m.team, (m.whisper ? '🔒 ' : '') + m.text);
       break;
     case 'roster':
       updateCount(m.count);
@@ -2283,6 +2459,7 @@ function handleMsg(m) {
          : gameMode === 'gg' ? `New match — work through all ${scoreLimit} weapons to win!`
          : `New match — first to ${scoreLimit} kills wins!`, myTeam);
       break;
+    default: handleAccountMsg(m); // account/social messages can arrive on the game socket too
   }
 }
 
@@ -3557,7 +3734,11 @@ function setupInput() {
       if (e.code === 'Escape') closeChat();
       if (e.code === 'Enter') {
         const text = $('chatInput').value.trim();
-        if (text) netSend({ t: 'chat', text });
+        if (text) {
+          const w = text.match(/^\/w(?:hisper)?\s+(\S+)\s+([\s\S]+)$/i); // /w <name> <message>
+          if (w) netSend({ t: 'whisper', to: w[1], text: w[2] });
+          else netSend({ t: 'chat', text });
+        }
         closeChat();
       }
       return;

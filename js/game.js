@@ -149,18 +149,23 @@ let menuRefresh = null; // set by setupMenu so auth changes can refresh the menu
 // ---- account (optional login; syncs coins/unlocks/friends across devices) ----
 let account = null; // { user, token } when logged in
 let authToken = localStorage.getItem('bf_token') || null;
+let pendingRequests = [];   // incoming friend requests (account mode)
 let syncTimer = null;
 function presenceId() { return account ? account.user : myPid; }
-// Push the current profile to the server (debounced) when logged in.
+// Send a message over whichever socket is live (game in-game, else lobby).
+function authSend(obj) {
+  const s = JSON.stringify(obj);
+  if (ws && ws.readyState === 1) ws.send(s);
+  else if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(s);
+  else { connectLobby(); setTimeout(() => { if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(s); }, 400); }
+}
+// Push coins + unlocks to the server (debounced) when logged in. Friends are
+// managed server-side via requests/accept, so they're not sent here.
 function syncAccount() {
   if (!account) return;
-  const payload = JSON.stringify({ t: 'acct_save', token: account.token, coins, unlocked: [...unlocked], friends });
+  const payload = JSON.stringify({ t: 'acct_save', token: account.token, coins, unlocked: [...unlocked] });
   clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => {
-    if (ws && ws.readyState === 1) ws.send(payload);
-    else if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(payload);
-    else { connectLobby(); setTimeout(() => { if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(payload); }, 500); }
-  }, 400);
+  syncTimer = setTimeout(() => authSend(JSON.parse(payload)), 400);
 }
 let myAgent = (AGENTS[localStorage.getItem('blockade_agent')] && isUnlocked(localStorage.getItem('blockade_agent'))) ? localStorage.getItem('blockade_agent') : 'soldier';
 const hex6 = n => '#' + n.toString(16).padStart(6, '0');
@@ -427,8 +432,20 @@ function setupMenu() {
   if (fin) fin.addEventListener('keydown', e => { if (e.key === 'Enter') { addFriend(fin.value); fin.value = ''; } });
   const cc = $('copyCodeBtn');
   if (cc) cc.addEventListener('click', () => {
-    if (navigator.clipboard) navigator.clipboard.writeText(myPid).then(() => { cc.textContent = 'COPIED ✓'; setTimeout(() => cc.textContent = 'COPY', 1400); }).catch(() => {});
+    if (navigator.clipboard) navigator.clipboard.writeText(presenceId()).then(() => { cc.textContent = 'COPIED ✓'; setTimeout(() => cc.textContent = 'COPY', 1400); }).catch(() => {});
   });
+  renderRequests();
+
+  // ---- daily reward ----
+  const db = $('dailyBtn');
+  if (db) db.addEventListener('click', () => {
+    if (!account) { $('dailyMsg') && ($('dailyMsg').textContent = 'Log in to claim daily coins'); return; }
+    authSend({ t: 'daily_claim', token: account.token });
+  });
+
+  // ---- leaderboard ----
+  const lb = $('leaderBtn');
+  if (lb) lb.addEventListener('click', () => { $('leaderPanel').classList.toggle('open'); connectLobby(); authSend({ t: 'leaderboard' }); });
 }
 
 // ============================================================
@@ -447,11 +464,7 @@ function connectLobby() {
     lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: (account ? account.user : (localStorage.getItem('blockade_name') || 'Player')) }));
     requestPresence();
   };
-  lobbyWs.onmessage = e => {
-    let m; try { m = JSON.parse(e.data); } catch { return; }
-    if (m.t === 'presence') { presenceCache = m.online || {}; renderFriends(); }
-    else if (m.t === 'auth') onAuth(m);
-  };
+  lobbyWs.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } handleAccountMsg(m); };
   lobbyWs.onclose = () => { lobbyWs = null; };
   if (!lobbyTimer) lobbyTimer = setInterval(requestPresence, 4000);
 }
@@ -463,12 +476,69 @@ function closeLobby() {
   if (lobbyWs) { try { lobbyWs.close(); } catch {} lobbyWs = null; }
 }
 function addFriend(code, name) {
-  code = String(code || '').trim().toUpperCase().slice(0, 12);
-  if (!code || code === myPid || friends.some(f => f.code === code)) return;
+  code = String(code || '').trim().toLowerCase().slice(0, 16);
+  if (!code || code === presenceId().toLowerCase()) return;
+  if (account) { // logged in → send a friend request (needs mutual accept)
+    authSend({ t: 'friend_request', token: account.token, to: code });
+    const fm = $('friendMsg'); if (fm) fm.textContent = 'Request sent to ' + code + '…';
+    return;
+  }
+  if (friends.some(f => f.code === code)) return;
   friends.push({ code, name: String(name || '').trim().slice(0, 16) || code });
   saveFriends(); renderFriends(); requestPresence();
 }
-function removeFriend(code) { friends = friends.filter(f => f.code !== code); saveFriends(); renderFriends(); }
+function removeFriend(code) {
+  if (account) { authSend({ t: 'friend_remove', token: account.token, from: code }); return; }
+  friends = friends.filter(f => f.code !== code); saveFriends(); renderFriends();
+}
+function renderRequests() {
+  const box = $('friendRequests'); if (!box) return;
+  box.innerHTML = '';
+  if (!account || !pendingRequests.length) return;
+  const h = document.createElement('div'); h.className = 'freqh'; h.textContent = 'FRIEND REQUESTS'; box.appendChild(h);
+  for (const from of pendingRequests) {
+    const row = document.createElement('div'); row.className = 'frow';
+    const nm = document.createElement('span'); nm.className = 'fname'; nm.textContent = from; row.appendChild(nm);
+    const btns = document.createElement('span'); btns.className = 'fbtns';
+    const a = document.createElement('button'); a.textContent = '✓'; a.className = 'fjoin'; a.title = 'Accept';
+    a.addEventListener('click', () => authSend({ t: 'friend_accept', token: account.token, from })); btns.appendChild(a);
+    const d = document.createElement('button'); d.textContent = '✕'; d.className = 'fdel'; d.title = 'Decline';
+    d.addEventListener('click', () => authSend({ t: 'friend_decline', token: account.token, from })); btns.appendChild(d);
+    row.appendChild(btns); box.appendChild(row);
+  }
+}
+function onDaily(m) {
+  const el = $('dailyMsg');
+  if (m.ok) { coins = m.coins; const cb = $('coinBal'); if (cb) cb.textContent = '🪙 ' + coins; if (el) el.textContent = '+' + m.reward + ' 🪙 claimed!'; }
+  else if (el) { el.textContent = m.error || 'not available'; if (m.next) { const h = Math.max(0, Math.ceil((m.next - Date.now()) / 3600000)); el.textContent += ' (~' + h + 'h)'; } }
+}
+function renderLeaderboard(list) {
+  const box = $('leaderList'); if (!box) return;
+  box.innerHTML = '';
+  if (!list.length) { box.innerHTML = '<div class="fempty">No players yet.</div>'; return; }
+  list.forEach((e, i) => {
+    const row = document.createElement('div'); row.className = 'lrow';
+    row.innerHTML = `<span class="lrank">${i + 1}</span><span class="lname">${e.user}</span><span class="lwin">${e.wins} W</span><span class="lco">${e.coins} 🪙</span>`;
+    box.appendChild(row);
+  });
+}
+// Account/social messages that can arrive on either socket.
+function handleAccountMsg(m) {
+  switch (m.t) {
+    case 'auth': onAuth(m); return true;
+    case 'presence': presenceCache = m.online || {}; renderFriends(); return true;
+    case 'friend_request_res': { const fm = $('friendMsg'); if (fm) fm.textContent = m.ok ? ('Request sent to ' + m.to) : (m.error || 'failed'); return true; }
+    case 'friend_req_in': if (!pendingRequests.includes(m.from)) pendingRequests.push(m.from); renderRequests(); { const fm = $('friendMsg'); if (fm) fm.textContent = 'New request from ' + m.from; } return true;
+    case 'friend_added': if (!friends.some(f => f.code === m.user)) friends.push({ code: m.user, name: m.user }); renderFriends(); requestPresence(); return true;
+    case 'friend_update':
+      if (Array.isArray(m.friends)) friends = m.friends.map(u => ({ code: u, name: u }));
+      if (Array.isArray(m.requests)) pendingRequests = m.requests;
+      renderFriends(); renderRequests(); requestPresence(); return true;
+    case 'daily': onDaily(m); return true;
+    case 'leaderboard': renderLeaderboard(m.list || []); return true;
+  }
+  return false;
+}
 function joinFriend(room) {
   const nm = ($('nameInput').value || '').trim() || localStorage.getItem('blockade_name') || '';
   if (nm.length < 2) { $('menuErr').textContent = 'Enter a nickname first!'; return; }
@@ -479,7 +549,7 @@ function joinFriend(room) {
   connect(nm);
 }
 function renderFriends() {
-  const codeEl = $('myCode'); if (codeEl) codeEl.textContent = myPid;
+  const codeEl = $('myCode'); if (codeEl) codeEl.textContent = presenceId();
   const list = $('friendsList'); if (!list) return;
   list.innerHTML = '';
   if (!friends.length) { list.innerHTML = '<div class="fempty">No friends yet — share your code and add theirs.</div>'; return; }
@@ -505,11 +575,12 @@ function onAuth(m) {
     const pr = m.profile || {};
     coins = pr.coins || 0;
     unlocked = new Set((pr.unlocked && pr.unlocked.length) ? pr.unlocked : ['soldier']); unlocked.add('soldier');
-    friends = Array.isArray(pr.friends) ? pr.friends : [];
+    friends = Array.isArray(pr.friends) ? pr.friends.map(u => ({ code: u, name: u })) : [];
+    pendingRequests = Array.isArray(pr.requests) ? pr.requests : [];
     if (!isUnlocked(myAgent)) { myAgent = 'soldier'; localStorage.setItem('blockade_agent', 'soldier'); }
     if (msg) msg.textContent = '';
     if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: m.user }));
-    renderAuth(); if (menuRefresh) menuRefresh(); requestPresence();
+    renderAuth(); renderRequests(); if (menuRefresh) menuRefresh(); requestPresence();
   } else if (msg) { msg.textContent = m.error || 'Auth failed'; }
 }
 function doAuth(kind) {
@@ -531,9 +602,10 @@ function logout() {
   try { const u = JSON.parse(localStorage.getItem('bf_unlocked')); unlocked = new Set(Array.isArray(u) ? u : ['soldier']); } catch { unlocked = new Set(['soldier']); }
   unlocked.add('soldier');
   try { const f = JSON.parse(localStorage.getItem('bf_friends')); friends = Array.isArray(f) ? f : []; } catch { friends = []; }
+  pendingRequests = [];
   if (!isUnlocked(myAgent)) { myAgent = 'soldier'; localStorage.setItem('blockade_agent', 'soldier'); }
   if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: (localStorage.getItem('blockade_name') || 'Player') }));
-  renderAuth(); if (menuRefresh) menuRefresh(); requestPresence();
+  renderAuth(); renderRequests(); if (menuRefresh) menuRefresh(); requestPresence();
 }
 function renderAuth() {
   const inEl = $('authLoggedOut'), outEl = $('authLoggedIn');
@@ -552,7 +624,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId() }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId(), acct: account ? account.user : null }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -759,7 +831,7 @@ function handleMsg(m) {
       $('scoreBlue').textContent = scores.blue;
       break;
     case 'chat':
-      addChatMessage(m.name, m.team, m.text);
+      addChatMessage(m.name, m.team, (m.whisper ? '🔒 ' : '') + m.text);
       break;
     case 'roster':
       updateCount(m.count);
@@ -779,6 +851,7 @@ function handleMsg(m) {
          : gameMode === 'gg' ? `New match — work through all ${scoreLimit} weapons to win!`
          : `New match — first to ${scoreLimit} kills wins!`, myTeam);
       break;
+    default: handleAccountMsg(m); // account/social messages can arrive on the game socket too
   }
 }
 
@@ -2053,7 +2126,11 @@ function setupInput() {
       if (e.code === 'Escape') closeChat();
       if (e.code === 'Enter') {
         const text = $('chatInput').value.trim();
-        if (text) netSend({ t: 'chat', text });
+        if (text) {
+          const w = text.match(/^\/w(?:hisper)?\s+(\S+)\s+([\s\S]+)$/i); // /w <name> <message>
+          if (w) netSend({ t: 'whisper', to: w[1], text: w[2] });
+          else netSend({ t: 'chat', text });
+        }
         closeChat();
       }
       return;

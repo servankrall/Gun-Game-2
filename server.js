@@ -180,18 +180,19 @@ export class GameServer extends DurableObject {
   }
 
   // ---- friend presence (pid = a persistent client id sent at hello/join) ----
-  presenceOnline(pid, name, room, conn) {
+  presenceOnline(pid, name, room, ws) {
     let e = this.online.get(pid);
     if (!e) { e = { name, room, socks: new Set() }; this.online.set(pid, e); }
-    e.name = name || e.name; e.room = room; e.socks.add(conn);
+    e.name = name || e.name; e.room = room; e.socks.add(ws);
   }
-  presenceOffline(pid, conn) {
+  presenceOffline(pid, ws) {
     const e = this.online.get(pid); if (!e) return;
-    e.socks.delete(conn); if (!e.socks.size) this.online.delete(pid);
+    e.socks.delete(ws); if (!e.socks.size) this.online.delete(pid);
   }
+  pushToUser(user, obj) { const e = this.online.get(String(user).toLowerCase()); if (!e) return; for (const ws of e.socks) this.send(ws, obj); }
   presenceQuery(pids) {
     const out = {};
-    for (const pid of pids) { const e = this.online.get(pid); if (e) out[pid] = { name: e.name, room: e.room }; }
+    for (const pid of pids) { const k = String(pid).toLowerCase(); const e = this.online.get(k); if (e) out[pid] = { name: e.name, room: e.room }; }
     return out;
   }
 
@@ -208,14 +209,18 @@ export class GameServer extends DurableObject {
     let h = 5381; for (let i = 0; i < msg.length; i++) h = ((h << 5) + h + msg.charCodeAt(i)) | 0; // fallback (non-secure ctx)
     return 'x' + (h >>> 0).toString(16);
   }
-  profileOf(a) { return { coins: a.coins || 0, unlocked: a.unlocked || ['soldier'], friends: a.friends || [] }; }
+  profileOf(a) { return { coins: a.coins || 0, unlocked: a.unlocked || ['soldier'], friends: a.friends || [], wins: a.wins || 0, requests: a.requests || [], lastDaily: a.lastDaily || 0 }; }
+  async _list(prefix) { // works for DO storage and the in-memory offline fallback
+    if (this.ctx?.storage) { const map = await this.ctx.storage.list({ prefix }); return [...map.values()]; }
+    this._mem ||= new Map(); const out = []; for (const [k, v] of this._mem) if (k.startsWith(prefix)) out.push(v); return out;
+  }
   async register(user, pass) {
     user = String(user || '').trim().toLowerCase().slice(0, 16);
     if (!/^[a-z0-9_]{3,16}$/.test(user)) return { ok: false, error: 'Username: 3-16 letters/numbers/_' };
     if (String(pass || '').length < 4) return { ok: false, error: 'Password too short (min 4)' };
     if (await this._get('acct:' + user)) return { ok: false, error: 'Username taken' };
     const salt = this.randHex(8);
-    const acct = { user, salt, hash: await this.hashPass(pass, salt), coins: 0, unlocked: ['soldier'], friends: [] };
+    const acct = { user, salt, hash: await this.hashPass(pass, salt), coins: 0, unlocked: ['soldier'], friends: [], requests: [], wins: 0, lastDaily: 0 };
     await this._put('acct:' + user, acct);
     const token = this.randHex(16); await this._put('tok:' + token, user);
     return { ok: true, user, token, profile: this.profileOf(acct) };
@@ -236,6 +241,61 @@ export class GameServer extends DurableObject {
     if (Array.isArray(unlocked)) acct.unlocked = unlocked.slice(0, 60).map(String);
     if (Array.isArray(friends)) acct.friends = friends.slice(0, 200);
     await this._put('acct:' + user, acct);
+  }
+  async userByToken(token) { return (await this._get('tok:' + String(token || ''))) || null; }
+  async friendRequest(token, to) {
+    const from = await this.userByToken(token); if (!from) return { ok: false, error: 'log in first' };
+    to = String(to || '').trim().toLowerCase().slice(0, 16);
+    if (!to || to === from) return { ok: false, error: 'invalid user' };
+    const tAcct = await this._get('acct:' + to); if (!tAcct) return { ok: false, error: 'no such user' };
+    const fAcct = await this._get('acct:' + from);
+    if ((fAcct.friends || []).includes(to)) return { ok: false, error: 'already friends' };
+    tAcct.requests = tAcct.requests || [];
+    if (!tAcct.requests.includes(from)) { tAcct.requests.push(from); await this._put('acct:' + to, tAcct); }
+    this.pushToUser(to, { t: 'friend_req_in', from });
+    return { ok: true, to };
+  }
+  async friendAccept(token, from) {
+    const me = await this.userByToken(token); if (!me) return { ok: false };
+    from = String(from || '').toLowerCase().slice(0, 16);
+    const meAcct = await this._get('acct:' + me), fAcct = await this._get('acct:' + from);
+    if (!meAcct || !fAcct) return { ok: false };
+    meAcct.requests = (meAcct.requests || []).filter(x => x !== from);
+    meAcct.friends = meAcct.friends || []; if (!meAcct.friends.includes(from)) meAcct.friends.push(from);
+    fAcct.friends = fAcct.friends || []; if (!fAcct.friends.includes(me)) fAcct.friends.push(me);
+    await this._put('acct:' + me, meAcct); await this._put('acct:' + from, fAcct);
+    this.pushToUser(from, { t: 'friend_added', user: me });
+    return { ok: true, friends: meAcct.friends, requests: meAcct.requests };
+  }
+  async friendDecline(token, from) {
+    const me = await this.userByToken(token); if (!me) return { ok: false };
+    from = String(from || '').toLowerCase().slice(0, 16);
+    const meAcct = await this._get('acct:' + me); if (!meAcct) return { ok: false };
+    meAcct.requests = (meAcct.requests || []).filter(x => x !== from);
+    await this._put('acct:' + me, meAcct);
+    return { ok: true, friends: meAcct.friends || [], requests: meAcct.requests };
+  }
+  async dailyClaim(token) {
+    const user = await this.userByToken(token); if (!user) return { ok: false, error: 'log in to claim' };
+    const acct = await this._get('acct:' + user); if (!acct) return { ok: false };
+    const now = Date.now(), DAY = 86400000;
+    if (now - (acct.lastDaily || 0) < DAY) return { ok: false, error: 'already claimed today', next: (acct.lastDaily || 0) + DAY };
+    const reward = 100;
+    acct.coins = (acct.coins || 0) + reward; acct.lastDaily = now;
+    await this._put('acct:' + user, acct);
+    return { ok: true, reward, coins: acct.coins };
+  }
+  async leaderboard() {
+    const accts = await this._list('acct:');
+    return accts.map(a => ({ user: a.user, wins: a.wins || 0, coins: a.coins || 0 }))
+      .sort((x, y) => (y.wins - x.wins) || (y.coins - x.coins)).slice(0, 10);
+  }
+  awardWins(r, winnerTeam, winnerName) {
+    for (const c of r.clients.values()) {
+      const p = c.player; if (!p.acct) continue;
+      const won = winnerName ? (p.name === winnerName) : (p.team === winnerTeam);
+      if (won) this._get('acct:' + p.acct).then(a => { if (a) { a.wins = (a.wins || 0) + 1; this._put('acct:' + p.acct, a); } }).catch(() => {});
+    }
   }
 
   room(id) {
@@ -258,12 +318,12 @@ export class GameServer extends DurableObject {
   }
 
   onConnect(ws) {
-    let id = null, roomId = null, pid = null; const conn = {};
+    let id = null, roomId = null, pid = null;
     ws.addEventListener('message', ev => {
       let m; try { m = JSON.parse(ev.data); } catch { return; }
       if (m.t === 'hello') { // lobby presence (menu, no game join)
-        pid = String(m.pid || '').toUpperCase().slice(0, 12) || null;
-        if (pid) this.presenceOnline(pid, String(m.name || 'Player').slice(0, 16), 'lobby', conn);
+        pid = String(m.pid || '').toLowerCase().slice(0, 16) || null;
+        if (pid) this.presenceOnline(pid, String(m.name || 'Player').slice(0, 16), 'lobby', ws);
         return;
       }
       if (m.t === 'presence_req') {
@@ -284,12 +344,17 @@ export class GameServer extends DurableObject {
         return;
       }
       if (m.t === 'acct_save') { this.saveProfile(m.token, m.coins, m.unlocked, m.friends); return; }
+      if (m.t === 'friend_request') { this.friendRequest(m.token, m.to).then(r => this.send(ws, { t: 'friend_request_res', ...r })).catch(() => {}); return; }
+      if (m.t === 'friend_accept') { this.friendAccept(m.token, m.from).then(r => this.send(ws, { t: 'friend_update', ...r })).catch(() => {}); return; }
+      if (m.t === 'friend_decline') { this.friendDecline(m.token, m.from).then(r => this.send(ws, { t: 'friend_update', ...r })).catch(() => {}); return; }
+      if (m.t === 'daily_claim') { this.dailyClaim(m.token).then(r => this.send(ws, { t: 'daily', ...r })).catch(() => {}); return; }
+      if (m.t === 'leaderboard') { this.leaderboard().then(list => this.send(ws, { t: 'leaderboard', list })).catch(() => {}); return; }
       if (m.t === 'join') {
         if (id !== null) return;
         roomId = String(m.room || 'pub').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24) || 'pub';
-        pid = String(m.pid || pid || '').toUpperCase().slice(0, 12) || null;
+        pid = String(m.pid || pid || '').toLowerCase().slice(0, 16) || null;
         id = this.handleJoin(ws, m, roomId);
-        if (pid) this.presenceOnline(pid, String(m.name || 'Player').slice(0, 16), roomId, conn);
+        if (pid) this.presenceOnline(pid, String(m.name || 'Player').slice(0, 16), roomId, ws);
         return;
       }
       if (id === null) return;
@@ -297,7 +362,7 @@ export class GameServer extends DurableObject {
     });
     const bye = () => {
       if (id !== null) { this.handleLeave(roomId, id); id = null; }
-      if (pid) { this.presenceOffline(pid, conn); }
+      if (pid) { this.presenceOffline(pid, ws); }
     };
     ws.addEventListener('close', bye);
     ws.addEventListener('error', bye);
@@ -325,6 +390,7 @@ export class GameServer extends DurableObject {
     const pos = spawnFor(team);
     const agent = agentOf(m.agent);
     const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, lastHit: 0, level: 0,
+      acct: m.acct ? String(m.acct).toLowerCase().slice(0, 16) : null,
       agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.clients.set(id, { ws, player });
     // First player in a room sets the bot difficulty AND the game mode for it.
@@ -397,6 +463,15 @@ export class GameServer extends DurableObject {
       case 'chat': {
         const text = String(m.text || '').slice(0, 120);
         if (text) this.broadcast(r, { t: 'chat', name: p.name, team: p.team, text });
+        break;
+      }
+      case 'whisper': { // private message to one player by name (/w name msg)
+        const to = String(m.to || '').slice(0, 16), text = String(m.text || '').slice(0, 120);
+        if (!text) break;
+        const tgt = [...r.clients.values()].find(x => x.player.name.toLowerCase() === to.toLowerCase());
+        if (!tgt) { this.send(c.ws, { t: 'chat', name: '*', team: p.team, text: `no player "${to}" here`, whisper: true }); break; }
+        this.send(tgt.ws, { t: 'chat', name: p.name + ' →you', team: p.team, text, whisper: true });
+        this.send(c.ws, { t: 'chat', name: 'you→ ' + tgt.player.name, team: p.team, text, whisper: true });
         break;
       }
       case 'ping':
@@ -509,6 +584,7 @@ export class GameServer extends DurableObject {
 
   endMatch(r, winner, winnerName) {
     r.over = true;
+    this.awardWins(r, winner, winnerName); // +1 win on the leaderboard for logged-in winners
     this.broadcast(r, { t: 'matchover', winner, winnerName: winnerName || null, scores: r.scores });
     setTimeout(() => this.resetMatch(r), 6000);
   }

@@ -121,6 +121,24 @@
   #friendsList .fbtns { display: flex; gap: 4px; }
   #friendsList .fjoin { background: #49c26a; color: #04210f; border: 2px solid #000; font-family: inherit; font-size: 8px; padding: 4px 7px; cursor: pointer; }
   #friendsList .fdel { background: transparent; color: #ff6a6a; border: none; font-size: 11px; cursor: pointer; }
+  .dailymsg { color: #ffd24a; font-size: 8px; text-align: center; min-height: 10px; }
+  #friendRequests { display: flex; flex-direction: column; gap: 5px; }
+  #friendRequests .freqh { color: #ffd24a; font-size: 8px; letter-spacing: 1px; margin-top: 2px; }
+  #friendRequests .frow { display: flex; align-items: center; gap: 8px; font-size: 9px; color: #fff; background: rgba(255,210,74,.1); padding: 6px 8px; }
+  #friendRequests .frow .fname { flex: 1; }
+  #friendRequests .fjoin { background: #49c26a; color: #04210f; border: 2px solid #000; font-family: inherit; font-size: 9px; padding: 4px 8px; cursor: pointer; }
+  #friendRequests .fdel { background: transparent; color: #ff6a6a; border: none; font-size: 11px; cursor: pointer; }
+  #leaderPanel { display: none; flex-direction: column; gap: 6px; width: min(420px, 92vw); margin: 8px auto 0;
+    background: rgba(6,14,30,.72); border: 2px solid #2a3a5c; padding: 12px; }
+  #leaderPanel.open { display: flex; }
+  #leaderPanel .ltitle { color: #cfd6e6; font-size: 9px; letter-spacing: 1px; text-align: center; }
+  #leaderList { display: flex; flex-direction: column; gap: 4px; }
+  #leaderList .fempty { color: #8090ad; font-size: 8px; text-align: center; padding: 6px; }
+  #leaderList .lrow { display: flex; align-items: center; gap: 10px; font-size: 9px; color: #cfd6e6; background: rgba(255,255,255,.05); padding: 6px 8px; }
+  #leaderList .lrank { color: #ffd24a; width: 16px; }
+  #leaderList .lname { flex: 1; color: #fff; }
+  #leaderList .lwin { color: #49c26a; }
+  #leaderList .lco { color: #ffd24a; }
   #menu .ver { position: absolute; left: 8px; bottom: 6px; color: #5d6a86; font-size: 8px; }
   #menu .credit { position: absolute; right: 8px; bottom: 6px; color: #8090ad; font-size: 8px; text-shadow: 1px 1px 0 #000; }
   @media (max-width: 760px) { .hide-sm { display: none; } #agentCard { width: 210px; height: 350px; } .pslot { height: 300px; } }
@@ -390,6 +408,9 @@
         <button id="inviteBtn" class="linkbtn">⧉ INVITE FRIENDS</button>
         <button id="friendsBtn" class="linkbtn">👥 FRIENDS</button>
         <button id="authBtn" class="linkbtn">👤 ACCOUNT</button>
+        <button id="leaderBtn" class="linkbtn">🏆 LEADERBOARD</button>
+        <button id="dailyBtn" class="linkbtn">🎁 DAILY +100</button>
+        <div id="dailyMsg" class="dailymsg"></div>
       </div>
     </div>
 
@@ -411,8 +432,15 @@
 
     <div id="friendsPanel">
       <div class="fcode">YOUR CODE: <b id="myCode">------</b> <button id="copyCodeBtn" class="fcopy">COPY</button></div>
-      <div class="fadd"><input id="friendCodeInput" maxlength="12" placeholder="Friend code" autocomplete="off"><button id="friendAddBtn">ADD</button></div>
+      <div class="fadd"><input id="friendCodeInput" maxlength="16" placeholder="Friend code / username" autocomplete="off"><button id="friendAddBtn">ADD</button></div>
+      <div id="friendMsg" class="dailymsg"></div>
+      <div id="friendRequests"></div>
       <div id="friendsList"></div>
+    </div>
+
+    <div id="leaderPanel">
+      <div class="ltitle">🏆 LEADERBOARD <span class="asub">(top by wins, then coins)</span></div>
+      <div id="leaderList"></div>
     </div>
 
     <div id="optPanel">
@@ -475,7 +503,7 @@
     <div id="respawnFlash"></div>
     <div id="chat">
       <div id="chatMessages"></div>
-      <input id="chatInput" maxlength="120" placeholder="Message... (Enter — send, Esc — close)" autocomplete="off">
+      <input id="chatInput" maxlength="120" placeholder="Message…  /w &lt;name&gt; &lt;msg&gt; to whisper  (Enter send · Esc close)" autocomplete="off">
     </div>
     <div id="voiceInd"><div class="dot"></div><span>MICROPHONE ON</span></div>
     <div id="touch">
