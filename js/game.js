@@ -100,8 +100,10 @@ const THEMES = {
              tints: { sand: 0x8a8f9c, gravel: 0x5a606c, dirt: 0x6a6250, stone: 0x6b7280, cobble: 0x5a6270 } },
   metro:   { name: 'METRO', sky: 0x9aa3ad, fog: 0xa7b0ba, fogN: 50, fogF: 130, sun: 0xdfe4ea, sunI: 1.1, amb: 0xc7cdd6, ambI: 0.85,
              tints: { sand: 0x9a9a9c, gravel: 0x6e6e72, dirt: 0x7a7570, stone: 0x8a8f96, cobble: 0x777c84 } },
+  toxic:   { name: 'TOXIC MARSH', sky: 0x2b3b1f, fog: 0x33421f, fogN: 32, fogF: 100, sun: 0xd2e089, sunI: 1.15, amb: 0x3a4a2a, ambI: 0.72,
+             tints: { sand: 0x6a7a3a, gravel: 0x44502a, dirt: 0x4a5a24, stone: 0x516039, cobble: 0x3e4a2a } },
 };
-const MAP_IDS = ['desert', 'arctic', 'volcano', 'night', 'metro'];
+const MAP_IDS = ['desert', 'arctic', 'volcano', 'night', 'metro', 'toxic'];
 function applyTheme(id) {
   mapTheme = THEMES[id] ? id : 'desert';
   const t = THEMES[mapTheme];
@@ -138,7 +140,9 @@ function isUnlocked(id) { return (AGENTS[id]?.cost || 0) === 0 || unlocked.has(i
 // they persist to this device's localStorage.
 function saveCoins() { if (account) syncAccount(); else localStorage.setItem('bf_coins', String(coins)); }
 function saveUnlocked() { if (account) syncAccount(); else localStorage.setItem('bf_unlocked', JSON.stringify([...unlocked])); }
-function awardCoins(n) { coins += n; saveCoins(); const el = $('coinBal'); if (el) el.textContent = '🪙 ' + coins; }
+const COIN = '<span class="coin"></span>'; // CSS gold-coin icon (emoji renders as tofu in the pixel font)
+function setCoinBal() { const el = $('coinBal'); if (el) el.innerHTML = COIN + coins; }
+function awardCoins(n) { coins += n; saveCoins(); setCoinBal(); }
 // ---- persistent identity + friends (friend code = your player id) ----
 let myPid = localStorage.getItem('bf_pid');
 if (!myPid) { myPid = Math.random().toString(36).slice(2, 8).toUpperCase(); localStorage.setItem('bf_pid', myPid); }
@@ -185,6 +189,14 @@ let fov = Math.max(60, Math.min(100, parseInt(localStorage.getItem('bf_fov')) ||
 let sndVol = (() => { const v = parseFloat(localStorage.getItem('bf_vol')); return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.8; })();
 function applyFov() { if (camera) { camera.fov = fov; camera.updateProjectionMatrix(); } }
 function applyVol() { if (masterGain) masterGain.gain.value = sndVol; }
+let xhColor = localStorage.getItem('bf_xh') || 'white';
+const XH_COLORS = { white: null, green: '#49ff6a', cyan: '#39e6ff', red: '#ff4444', yellow: '#ffe23a', pink: '#ff5cc8' };
+function applyCrosshair() {
+  const root = document.documentElement.style, c = XH_COLORS[xhColor];
+  if (c) { root.setProperty('--xh', c); root.setProperty('--xh-blend', 'normal'); }
+  else { root.removeProperty('--xh'); root.removeProperty('--xh-blend'); }
+}
+applyCrosshair();
 
 const tracers = [], particles = [], flashes = [], rockets = [], grenades = [];
 
@@ -294,7 +306,7 @@ function setupMenu() {
     $('agentRole').textContent = a.role;
     const cf = document.querySelector('.cardframe');
     if (cf) cf.style.borderColor = hex6(a.accent);
-    const cb = $('coinBal'); if (cb) cb.textContent = '🪙 ' + coins;
+    setCoinBal();
     refreshChips();
   }
   // Clicking an owned class selects it; clicking a locked class buys it if you
@@ -315,7 +327,7 @@ function setupMenu() {
       if (err) err.textContent = `Unlocked ${AGENTS[id].name}!`;
       renderAgent();
     } else {
-      if (err) err.textContent = `${AGENTS[id].name} is locked — need ${cost - coins} more 🪙 (you have ${coins})`;
+      if (err) err.innerHTML = `${AGENTS[id].name} is locked — need ${cost - coins} more ${COIN} (you have ${coins})`;
     }
   }
   function cycle(dir) {
@@ -372,6 +384,12 @@ function setupMenu() {
     volR.value = sndVol; if (volV) volV.textContent = Math.round(sndVol * 100) + '%';
     volR.addEventListener('input', () => { sndVol = parseFloat(volR.value); localStorage.setItem('bf_vol', String(sndVol)); if (volV) volV.textContent = Math.round(sndVol * 100) + '%'; applyVol(); });
   }
+  // crosshair color (applies live)
+  const xhSel = $('xhSel');
+  if (xhSel) {
+    xhSel.value = xhColor;
+    xhSel.addEventListener('change', () => { xhColor = xhSel.value; localStorage.setItem('bf_xh', xhColor); applyCrosshair(); });
+  }
   const start = () => {
     const name = input.value.trim();
     if (name.length < 2) { err.textContent = 'Nickname must be at least 2 characters!'; return; }
@@ -411,7 +429,7 @@ function setupMenu() {
   if (myRoom && inv) inv.textContent = 'ROOM: ' + myRoom + ' (copy link)';
 
   // let auth changes refresh the menu view (coins, chips, friends, auth state)
-  menuRefresh = () => { renderAgent(); renderFriends(); renderAuth(); const cb = $('coinBal'); if (cb) cb.textContent = '🪙 ' + coins; };
+  menuRefresh = () => { renderAgent(); renderFriends(); renderAuth(); setCoinBal(); };
 
   // ---- account panel ----
   renderAuth();
@@ -509,7 +527,7 @@ function renderRequests() {
 }
 function onDaily(m) {
   const el = $('dailyMsg');
-  if (m.ok) { coins = m.coins; const cb = $('coinBal'); if (cb) cb.textContent = '🪙 ' + coins; if (el) el.textContent = '+' + m.reward + ' 🪙 claimed!'; }
+  if (m.ok) { coins = m.coins; setCoinBal(); if (el) el.innerHTML = '+' + m.reward + ' ' + COIN + ' claimed!'; }
   else if (el) { el.textContent = m.error || 'not available'; if (m.next) { const h = Math.max(0, Math.ceil((m.next - Date.now()) / 3600000)); el.textContent += ' (~' + h + 'h)'; } }
 }
 function renderLeaderboard(list) {
@@ -518,7 +536,7 @@ function renderLeaderboard(list) {
   if (!list.length) { box.innerHTML = '<div class="fempty">No players yet.</div>'; return; }
   list.forEach((e, i) => {
     const row = document.createElement('div'); row.className = 'lrow';
-    row.innerHTML = `<span class="lrank">${i + 1}</span><span class="lname">${e.user}</span><span class="lwin">${e.wins} W</span><span class="lco">${e.coins} 🪙</span>`;
+    row.innerHTML = `<span class="lrank">${i + 1}</span><span class="lname">${e.user}</span><span class="lwin">${e.wins} W</span><span class="lco">${e.coins} ${COIN}</span>`;
     box.appendChild(row);
   });
 }
@@ -2075,7 +2093,7 @@ function updateAmmoHud() {
   const w = WEAPONS[wkey];
   $('weaponName').textContent = w.name;
   $('ammoNum').textContent = w.builder ? `${me.blocks}` : w.tool ? '—' : `${me.ammo[wkey]} / ${w.mag}`;
-  const nh = $('nadeHud'); if (nh) nh.innerHTML = `🧨 x${me.nades} <span style="color:#888">[G]</span>`;
+  const nh = $('nadeHud'); if (nh) nh.innerHTML = `NADE x${me.nades} <span style="color:#888">[G]</span>`;
 }
 
 function feed(text, teamA, teamB) {
