@@ -823,6 +823,7 @@ function handleMsg(m) {
       SND.hurt();
       const v = $('dmgVignette');
       v.style.opacity = 1; setTimeout(() => v.style.opacity = 0, 120);
+      if (m.from) showDamageDir(m.from.x, m.from.z);
       break;
     }
     case 'heal': {
@@ -985,6 +986,17 @@ function showMatchOver(winner, sc, winnerName) {
   o.style.display = 'flex';
 }
 function hideMatchOver() { const o = $('matchOver'); if (o) o.style.display = 'none'; }
+// Red arc pointing toward whoever just hit you (same rotation as the minimap).
+function showDamageDir(fx, fz) {
+  const el = $('dmgDir'); if (!el) return;
+  const dx = fx - me.pos.x, dz = fz - me.pos.z;
+  const ca = Math.cos(me.ry), sa = Math.sin(me.ry);
+  const lx = dx * ca - dz * sa, ly = dx * sa + dz * ca;
+  const ang = Math.atan2(lx, -ly); // 0 = directly in front
+  el.style.transform = `rotate(${ang}rad)`;
+  el.style.opacity = 1;
+  clearTimeout(el._t); el._t = setTimeout(() => el.style.opacity = 0, 650);
+}
 function announce(text, color) {
   const el = $('announce');
   if (!el) return;

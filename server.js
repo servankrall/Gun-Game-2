@@ -522,7 +522,7 @@ export class GameServer extends DurableObject {
     tgt.hp -= dmg;
     tgt.lastHit = Date.now(); // resets the regen delay
     if (tgt.hp > 0) {
-      if (!tgt.bot) { const c = r.clients.get(tgt.id); if (c) this.send(c.ws, { t: 'hp', hp: tgt.hp }); }
+      if (!tgt.bot) { const c = r.clients.get(tgt.id); if (c) this.send(c.ws, { t: 'hp', hp: tgt.hp, from: attacker ? { x: attacker.pos.x, z: attacker.pos.z } : undefined }); }
       return;
     }
     tgt.hp = 0; tgt.alive = false; tgt.deaths++;

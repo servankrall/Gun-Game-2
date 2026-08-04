@@ -250,6 +250,14 @@
     position: absolute; inset: 0; opacity: 0; transition: opacity .35s;
     background: radial-gradient(ellipse at center, transparent 55%, rgba(255,0,0,.55) 100%);
   }
+  #dmgDir {
+    position: absolute; left: 50%; top: 50%; width: 320px; height: 320px; margin: -160px 0 0 -160px;
+    opacity: 0; transition: opacity .12s; pointer-events: none; transform-origin: center;
+  }
+  #dmgDir .arc {
+    position: absolute; left: 50%; top: 6px; width: 130px; height: 46px; margin-left: -65px;
+    background: radial-gradient(ellipse at center bottom, rgba(255,45,45,.92), rgba(255,45,45,0) 72%);
+  }
 
   #deathScreen {
     position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
@@ -486,6 +494,7 @@
 
   <div id="hud">
     <div id="dmgVignette"></div>
+    <div id="dmgDir"><div class="arc"></div></div>
     <div id="crosshair"></div>
     <div id="hitmarker"></div>
     <div id="scoreTop">

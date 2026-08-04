@@ -250,6 +250,14 @@
     position: absolute; inset: 0; opacity: 0; transition: opacity .35s;
     background: radial-gradient(ellipse at center, transparent 55%, rgba(255,0,0,.55) 100%);
   }
+  #dmgDir {
+    position: absolute; left: 50%; top: 50%; width: 320px; height: 320px; margin: -160px 0 0 -160px;
+    opacity: 0; transition: opacity .12s; pointer-events: none; transform-origin: center;
+  }
+  #dmgDir .arc {
+    position: absolute; left: 50%; top: 6px; width: 130px; height: 46px; margin-left: -65px;
+    background: radial-gradient(ellipse at center bottom, rgba(255,45,45,.92), rgba(255,45,45,0) 72%);
+  }
 
   #deathScreen {
     position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
@@ -486,6 +494,7 @@
 
   <div id="hud">
     <div id="dmgVignette"></div>
+    <div id="dmgDir"><div class="arc"></div></div>
     <div id="crosshair"></div>
     <div id="hitmarker"></div>
     <div id="scoreTop">
@@ -1086,7 +1095,7 @@ class GameServer {
     tgt.hp -= dmg;
     tgt.lastHit = Date.now(); // resets the regen delay
     if (tgt.hp > 0) {
-      if (!tgt.bot) { const c = r.clients.get(tgt.id); if (c) this.send(c.ws, { t: 'hp', hp: tgt.hp }); }
+      if (!tgt.bot) { const c = r.clients.get(tgt.id); if (c) this.send(c.ws, { t: 'hp', hp: tgt.hp, from: attacker ? { x: attacker.pos.x, z: attacker.pos.z } : undefined }); }
       return;
     }
     tgt.hp = 0; tgt.alive = false; tgt.deaths++;
@@ -2482,6 +2491,7 @@ function handleMsg(m) {
       SND.hurt();
       const v = $('dmgVignette');
       v.style.opacity = 1; setTimeout(() => v.style.opacity = 0, 120);
+      if (m.from) showDamageDir(m.from.x, m.from.z);
       break;
     }
     case 'heal': {
@@ -2644,6 +2654,17 @@ function showMatchOver(winner, sc, winnerName) {
   o.style.display = 'flex';
 }
 function hideMatchOver() { const o = $('matchOver'); if (o) o.style.display = 'none'; }
+// Red arc pointing toward whoever just hit you (same rotation as the minimap).
+function showDamageDir(fx, fz) {
+  const el = $('dmgDir'); if (!el) return;
+  const dx = fx - me.pos.x, dz = fz - me.pos.z;
+  const ca = Math.cos(me.ry), sa = Math.sin(me.ry);
+  const lx = dx * ca - dz * sa, ly = dx * sa + dz * ca;
+  const ang = Math.atan2(lx, -ly); // 0 = directly in front
+  el.style.transform = `rotate(${ang}rad)`;
+  el.style.opacity = 1;
+  clearTimeout(el._t); el._t = setTimeout(() => el.style.opacity = 0, 650);
+}
 function announce(text, color) {
   const el = $('announce');
   if (!el) return;
