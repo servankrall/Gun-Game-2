@@ -846,7 +846,9 @@ function handleMsg(m) {
       const vTeam = victim ? victim.team : myTeam;
       const kName = killer ? killer.name : myName;
       const kTeam = killer ? killer.team : myTeam;
-      feed(`${kName} ${m.head ? '[headshot] ' : ''}► ${vName}`, kTeam, vTeam);
+      const WLABEL = { rifle: 'RIFLE', smg: 'SMG', shotgun: 'SHOTGUN', sniper: 'SNIPER', lmg: 'LMG', pistol: 'PISTOL', bazooka: 'ROCKET', pickaxe: 'MELEE' };
+      const wl = WLABEL[m.w] || 'RIFLE';
+      feed(`${kName} [${wl}]${m.head ? ' HS' : ''} ► ${vName}`, kTeam, vTeam);
       // First blood: the first genuine kill of the match gets a shout-out.
       if (!firstBloodDone && m.killer !== m.victim) {
         firstBloodDone = true;

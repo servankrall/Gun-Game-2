@@ -541,7 +541,7 @@ export class GameServer extends DurableObject {
     // Deathmatch kills score for the team; CTF scores only on captures; Gun Game
     // tracks individual weapon-ladder progress instead of team score.
     if (r.mode === 'dm' && attacker) r.scores[attacker.team] = (r.scores[attacker.team] || 0) + 1;
-    this.broadcast(r, { t: 'death', victim: tgt.id, killer: attacker ? attacker.id : tgt.id, head });
+    this.broadcast(r, { t: 'death', victim: tgt.id, killer: attacker ? attacker.id : tgt.id, head, w: weapon || 'rifle' });
     this.broadcast(r, { t: 'scores', scores: r.scores });
     if (r.mode === 'gg') this.ggProgress(r, attacker, tgt, weapon);
     if (r.mode === 'dm' && attacker && r.scores[attacker.team] >= CFG.scoreLimit) this.endMatch(r, attacker.team);
@@ -743,7 +743,7 @@ export class GameServer extends DurableObject {
           const acc = Math.max(0.1, Math.min(0.9, (0.6 - best * 0.012) * bot.skill));
           if (Math.random() < acc) {
             const head = Math.random() < 0.12;
-            this.applyDamage(r, target, Math.round(w.dmg * (head ? 2 : 1)), bot, head);
+            this.applyDamage(r, target, Math.round(w.dmg * (head ? 2 : 1)), bot, head, 'rifle');
           }
         }
       } else {
