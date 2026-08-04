@@ -2840,7 +2840,7 @@ function buildPickups(list) {
     mesh.position.set(pk.x, pk.y + 0.1, pk.z);
     mesh.visible = pk.active !== false;
     scene.add(mesh);
-    pickupMeshes.push({ mesh, base: pk.y + 0.1 });
+    pickupMeshes.push({ mesh, base: pk.y + 0.1, type: pk.type });
   }
 }
 function updatePickups(dt) {
@@ -4174,6 +4174,25 @@ function drawMinimap() {
     const dx = wx - me.pos.x, dz = wz - me.pos.z;
     return [R + (dx * ca - dz * sa) * scale, R + (dx * sa + dz * ca) * scale];
   };
+  // pickups (health = green, supply = olive) — only while active
+  for (const pm of pickupMeshes) {
+    if (!pm.mesh.visible) continue;
+    const [px, py] = plot(pm.mesh.position.x, pm.mesh.position.z);
+    if (Math.hypot(px - R, py - R) > R - 2) continue;
+    g.fillStyle = pm.type === 'supply' ? '#c8b84a' : '#49c26a';
+    g.fillRect(px - 2, py - 2, 4, 4);
+  }
+  // CTF flags (diamond markers)
+  if (gameMode === 'ctf' && flagMeshes.red) {
+    for (const t of ['red', 'blue']) {
+      const fm = flagMeshes[t]; if (!fm || !fm.visible) continue;
+      const [px, py] = plot(fm.position.x, fm.position.z);
+      if (Math.hypot(px - R, py - R) > R - 2) continue;
+      g.fillStyle = t === 'red' ? '#ff5555' : '#7f9fff';
+      g.beginPath(); g.moveTo(px, py - 4); g.lineTo(px + 4, py); g.lineTo(px, py + 4); g.lineTo(px - 4, py); g.closePath(); g.fill();
+      g.strokeStyle = '#000'; g.lineWidth = 1; g.stroke();
+    }
+  }
   for (const r of remotes.values()) {
     if (!r.alive) continue;
     const [px, py] = plot(r.group.position.x, r.group.position.z);
