@@ -781,6 +781,16 @@ function handleMsg(m) {
     }
     case 'pong': dbgOnPong(m); break;
     case 'pickup': { const pm = pickupMeshes[m.i]; if (pm) pm.mesh.visible = m.active !== false; if (m.active === false) SND.spawn(); break; }
+    case 'rank': {
+      const rr = remotes.get(m.id);
+      if (rr && rr.group.userData.nameSprite) {
+        const ud = rr.group.userData;
+        rr.group.remove(ud.nameSprite);
+        const ns = makeNameSprite(ud.name, ud.team, m.tier);
+        rr.group.add(ns); ud.nameSprite = ns; ud.tier = m.tier;
+      }
+      break;
+    }
     case 'supply': { me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.blocks = AGENTS[myAgent]?.blocks || 64; updateAmmoHud(); updateHotbar(); SND.spawn(); announce('SUPPLIES!', '#7dd3fc'); break; }
     case 'flag': {
       const tn = m.team === 'red' ? 'Red' : 'Blue';
@@ -1335,26 +1345,28 @@ function makeFaceTexture() {
 }
 let faceTex = null;
 
-function makeNameSprite(name, team) {
+const RANK_COL = { BRONZE: '#cd7f32', SILVER: '#c0c0c0', GOLD: '#ffd24a', PLATINUM: '#5fe0d0', DIAMOND: '#7dd3fc', MASTER: '#ff5cc8' };
+function makeNameSprite(name, team, tier) {
   const c = document.createElement('canvas');
   const g = c.getContext('2d');
   g.font = '28px monospace';
   const w = Math.max(64, g.measureText(name).width + 24);
-  c.width = w; c.height = 44;
+  const h = tier ? 66 : 44;
+  c.width = w; c.height = h;
   const g2 = c.getContext('2d');
-  g2.fillStyle = 'rgba(0,0,0,0.45)'; g2.fillRect(0, 0, w, 44);
-  g2.font = 'bold 28px monospace';
-  g2.fillStyle = TEAM_COL[team];
+  g2.fillStyle = 'rgba(0,0,0,0.45)'; g2.fillRect(0, 0, w, h);
   g2.textAlign = 'center'; g2.textBaseline = 'middle';
-  g2.fillText(name, w / 2, 23);
+  if (tier) { g2.font = 'bold 18px monospace'; g2.fillStyle = RANK_COL[tier] || '#7dd3fc'; g2.fillText(tier, w / 2, 14); }
+  g2.font = 'bold 28px monospace'; g2.fillStyle = TEAM_COL[team];
+  g2.fillText(name, w / 2, tier ? 45 : 23);
   const t = new THREE.CanvasTexture(c);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t }));
-  sp.scale.set(w / 70, 0.62, 1);
+  sp.scale.set(w / 70, h / 70, 1);
   sp.position.y = 2.45;
   return sp;
 }
 
-function makeCharacter(team, name, agentId, color) {
+function makeCharacter(team, name, agentId, color, tier) {
   const group = new THREE.Group();
   const accentCol = (typeof color === 'number' && color >= 0) ? color : (AGENTS[agentId]?.accent ?? 0x9aa4b2);
   const skin = new THREE.MeshLambertMaterial({ color: 0xd8a37a });
@@ -1391,14 +1403,15 @@ function makeCharacter(team, name, agentId, color) {
   helmet.position.y = 1.92;
 
   [head, body, armL, armR, legL, legR, gun, helmet].forEach(o => { o.castShadow = true; group.add(o); });
-  group.add(makeNameSprite(name, team));
-  group.userData = { head, armL, armR, legL, legR, gun };
+  const nameSprite = makeNameSprite(name, team, tier);
+  group.add(nameSprite);
+  group.userData = { head, armL, armR, legL, legR, gun, nameSprite, name, team };
   return group;
 }
 
 function addRemote(p) {
   if (remotes.has(p.id)) return;
-  const group = makeCharacter(p.team, p.name, p.agent, p.color);
+  const group = makeCharacter(p.team, p.name, p.agent, p.color, p.rankTier);
   group.position.set(p.pos.x, p.pos.y, p.pos.z);
   group.rotation.y = p.ry + Math.PI;
   group.visible = p.alive;

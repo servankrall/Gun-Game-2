@@ -186,6 +186,13 @@ function makeFlags(r) {
 }
 const clampArena = v => Math.max(-HALF + 1.5, Math.min(HALF - 2.5, v));
 
+// Rank tier from account stats (must match the client's rankOf tiers).
+function rankTier(wins, kills) {
+  const xp = (wins || 0) * 100 + (kills || 0) * 5;
+  const T = [[0, 'BRONZE'], [300, 'SILVER'], [900, 'GOLD'], [2000, 'PLATINUM'], [4000, 'DIAMOND'], [8000, 'MASTER']];
+  let t = 'BRONZE'; for (const [th, n] of T) if (xp >= th) t = n; return t;
+}
+
 // Health packs at fixed open spots (same on every map). Walk over one at <100 HP
 // to heal; it respawns after a delay.
 const PICKUP_SPOTS = [[0, 16], [0, -16], [16, 0], [-16, 0]];
@@ -403,7 +410,7 @@ export class GameServer extends DurableObject {
 
   // ---- combatant helpers ----
   entities(r) { return [...r.clients.values()].map(c => c.player).concat([...r.bots.values()]); }
-  pub(p) { return { id: p.id, name: p.name, team: p.team, pos: p.pos, ry: p.ry, rx: p.rx, anim: p.anim, alive: p.alive, hp: p.hp, kills: p.kills, deaths: p.deaths, bot: !!p.bot, agent: p.agent || 'soldier', color: p.color }; }
+  pub(p) { return { id: p.id, name: p.name, team: p.team, pos: p.pos, ry: p.ry, rx: p.rx, anim: p.anim, alive: p.alive, hp: p.hp, kills: p.kills, deaths: p.deaths, bot: !!p.bot, agent: p.agent || 'soldier', color: p.color, rankTier: p.rankTier }; }
   count(r) { return r.clients.size + r.bots.size; }
   teamCount(r, team) { return this.entities(r).filter(e => e.team === team).length; }
   humanTeamCount(r, team) { return [...r.clients.values()].filter(c => c.player.team === team).length; }
@@ -443,6 +450,10 @@ export class GameServer extends DurableObject {
       placed: [...r.placed.values()], destroyed: [...r.destroyed.values()],
     });
     this.broadcastExcept(r, id, { t: 'join', p: this.pub(player) });
+    // logged-in players show their rank above their name (loaded async)
+    if (player.acct) this._get('acct:' + player.acct).then(a => {
+      if (a && r.clients.has(id)) { player.rankTier = rankTier(a.wins, a.kills); this.broadcast(r, { t: 'rank', id, tier: player.rankTier }); }
+    }).catch(() => {});
     this.balanceBots(r);
     this.broadcast(r, { t: 'roster', count: this.count(r) });
     this.ensureTick();
