@@ -105,6 +105,8 @@
   #authPanel .arow button, #authPanel #logoutBtn { flex: 1; background: #e9c65a; color: #2a1c00; border: 2px solid #000; font-family: inherit; font-size: 9px; padding: 8px; cursor: pointer; }
   #authPanel .amsg { color: #ff9a9a; font-size: 8px; text-align: center; min-height: 10px; }
   #authPanel #authWho { color: #ffd24a; }
+  #authPanel .arank { color: #7dd3fc; font-size: 9px; letter-spacing: 1px; text-align: center; }
+  #leaderList .ltier { color: #7dd3fc; font-size: 8px; min-width: 58px; }
   #friendsPanel { display: none; flex-direction: column; gap: 8px; width: min(420px, 92vw); margin: 8px auto 0;
     background: rgba(6,14,30,.72); border: 2px solid #2a3a5c; padding: 12px; }
   #friendsPanel.open { display: flex; }
@@ -429,6 +431,7 @@
       </div>
       <div id="authLoggedIn" class="authbox">
         <div>Logged in as <b id="authWho">—</b></div>
+        <div id="authRank" class="arank">—</div>
         <button id="logoutBtn">LOG OUT</button>
       </div>
     </div>
@@ -787,7 +790,7 @@ class GameServer {
     let h = 5381; for (let i = 0; i < msg.length; i++) h = ((h << 5) + h + msg.charCodeAt(i)) | 0; // fallback (non-secure ctx)
     return 'x' + (h >>> 0).toString(16);
   }
-  profileOf(a) { return { coins: a.coins || 0, unlocked: a.unlocked || ['soldier'], friends: a.friends || [], wins: a.wins || 0, requests: a.requests || [], lastDaily: a.lastDaily || 0 }; }
+  profileOf(a) { return { coins: a.coins || 0, unlocked: a.unlocked || ['soldier'], friends: a.friends || [], wins: a.wins || 0, kills: a.kills || 0, requests: a.requests || [], lastDaily: a.lastDaily || 0 }; }
   async _list(prefix) { // works for DO storage and the in-memory offline fallback
     if (this.ctx?.storage) { const map = await this.ctx.storage.list({ prefix }); return [...map.values()]; }
     this._mem ||= new Map(); const out = []; for (const [k, v] of this._mem) if (k.startsWith(prefix)) out.push(v); return out;
@@ -798,7 +801,7 @@ class GameServer {
     if (String(pass || '').length < 4) return { ok: false, error: 'Password too short (min 4)' };
     if (await this._get('acct:' + user)) return { ok: false, error: 'Username taken' };
     const salt = this.randHex(8);
-    const acct = { user, salt, hash: await this.hashPass(pass, salt), coins: 0, unlocked: ['soldier'], friends: [], requests: [], wins: 0, lastDaily: 0 };
+    const acct = { user, salt, hash: await this.hashPass(pass, salt), coins: 0, unlocked: ['soldier'], friends: [], requests: [], wins: 0, kills: 0, lastDaily: 0 };
     await this._put('acct:' + user, acct);
     const token = this.randHex(16); await this._put('tok:' + token, user);
     return { ok: true, user, token, profile: this.profileOf(acct) };
@@ -865,14 +868,17 @@ class GameServer {
   }
   async leaderboard() {
     const accts = await this._list('acct:');
-    return accts.map(a => ({ user: a.user, wins: a.wins || 0, coins: a.coins || 0 }))
-      .sort((x, y) => (y.wins - x.wins) || (y.coins - x.coins)).slice(0, 10);
+    return accts.map(a => ({ user: a.user, wins: a.wins || 0, kills: a.kills || 0, coins: a.coins || 0 }))
+      .sort((x, y) => (y.wins - x.wins) || (y.kills - x.kills) || (y.coins - x.coins)).slice(0, 10);
   }
-  awardWins(r, winnerTeam, winnerName) {
+  // At match end, credit logged-in players: +1 win to the winners, and everyone's
+  // match kills toward their lifetime total (drives rank).
+  awardStats(r, winnerTeam, winnerName) {
     for (const c of r.clients.values()) {
       const p = c.player; if (!p.acct) continue;
       const won = winnerName ? (p.name === winnerName) : (p.team === winnerTeam);
-      if (won) this._get('acct:' + p.acct).then(a => { if (a) { a.wins = (a.wins || 0) + 1; this._put('acct:' + p.acct, a); } }).catch(() => {});
+      const kills = p.kills || 0;
+      this._get('acct:' + p.acct).then(a => { if (a) { if (won) a.wins = (a.wins || 0) + 1; a.kills = (a.kills || 0) + kills; this._put('acct:' + p.acct, a); } }).catch(() => {});
     }
   }
 
@@ -1174,7 +1180,7 @@ class GameServer {
 
   endMatch(r, winner, winnerName) {
     r.over = true;
-    this.awardWins(r, winner, winnerName); // +1 win on the leaderboard for logged-in winners
+    this.awardStats(r, winner, winnerName); // credit wins + kills to logged-in players' accounts
     this.broadcast(r, { t: 'matchover', winner, winnerName: winnerName || null, scores: r.scores });
     setTimeout(() => this.resetMatch(r), 6000);
   }
@@ -1795,6 +1801,10 @@ let menuRefresh = null; // set by setupMenu so auth changes can refresh the menu
 let account = null; // { user, token } when logged in
 let authToken = localStorage.getItem('bf_token') || null;
 let pendingRequests = [];   // incoming friend requests (account mode)
+let myWins = 0, myKills = 0; // account stats (drive rank)
+function xpOf(w, k) { return (w || 0) * 100 + (k || 0) * 5; }
+const RANK_TIERS = [[0, 'BRONZE'], [300, 'SILVER'], [900, 'GOLD'], [2000, 'PLATINUM'], [4000, 'DIAMOND'], [8000, 'MASTER']];
+function rankOf(w, k) { const xp = xpOf(w, k); let tier = 'BRONZE'; for (const [th, n] of RANK_TIERS) if (xp >= th) tier = n; return { tier, level: 1 + Math.floor(Math.sqrt(xp / 25)) }; }
 let syncTimer = null;
 function presenceId() { return account ? account.user : myPid; }
 // Send a message over whichever socket is live (game in-game, else lobby).
@@ -2198,7 +2208,7 @@ function renderLeaderboard(list) {
   if (!list.length) { box.innerHTML = '<div class="fempty">No players yet.</div>'; return; }
   list.forEach((e, i) => {
     const row = document.createElement('div'); row.className = 'lrow';
-    row.innerHTML = `<span class="lrank">${i + 1}</span><span class="lname">${e.user}</span><span class="lwin">${e.wins} W</span><span class="lco">${e.coins} ${COIN}</span>`;
+    row.innerHTML = `<span class="lrank">${i + 1}</span><span class="lname">${e.user}</span><span class="ltier">${rankOf(e.wins, e.kills).tier}</span><span class="lwin">${e.wins}W</span><span class="lco">${e.coins} ${COIN}</span>`;
     box.appendChild(row);
   });
 }
@@ -2267,6 +2277,7 @@ function onAuth(m) {
     unlocked = new Set((pr.unlocked && pr.unlocked.length) ? pr.unlocked : ['soldier']); unlocked.add('soldier');
     friends = Array.isArray(pr.friends) ? pr.friends.map(u => ({ code: u, name: u })) : [];
     pendingRequests = Array.isArray(pr.requests) ? pr.requests : [];
+    myWins = pr.wins || 0; myKills = pr.kills || 0;
     if (!isUnlocked(myAgent)) { myAgent = 'soldier'; localStorage.setItem('blockade_agent', 'soldier'); }
     if (msg) msg.textContent = '';
     if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: m.user }));
@@ -2292,7 +2303,7 @@ function logout() {
   try { const u = JSON.parse(localStorage.getItem('bf_unlocked')); unlocked = new Set(Array.isArray(u) ? u : ['soldier']); } catch { unlocked = new Set(['soldier']); }
   unlocked.add('soldier');
   try { const f = JSON.parse(localStorage.getItem('bf_friends')); friends = Array.isArray(f) ? f : []; } catch { friends = []; }
-  pendingRequests = [];
+  pendingRequests = []; myWins = 0; myKills = 0;
   if (!isUnlocked(myAgent)) { myAgent = 'soldier'; localStorage.setItem('blockade_agent', 'soldier'); }
   if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: (localStorage.getItem('blockade_name') || 'Player') }));
   renderAuth(); renderRequests(); if (menuRefresh) menuRefresh(); requestPresence();
@@ -2300,8 +2311,11 @@ function logout() {
 function renderAuth() {
   const inEl = $('authLoggedOut'), outEl = $('authLoggedIn');
   if (!inEl || !outEl) return;
-  if (account) { inEl.style.display = 'none'; outEl.style.display = 'flex'; $('authWho').textContent = account.user; }
-  else { inEl.style.display = 'flex'; outEl.style.display = 'none'; }
+  if (account) {
+    inEl.style.display = 'none'; outEl.style.display = 'flex'; $('authWho').textContent = account.user;
+    const rk = rankOf(myWins, myKills), re = $('authRank');
+    if (re) re.textContent = `${rk.tier} · Lv ${rk.level} · ${myWins}W / ${myKills}K`;
+  } else { inEl.style.display = 'flex'; outEl.style.display = 'none'; }
 }
 
 // Leave the current match and go back to the main menu.

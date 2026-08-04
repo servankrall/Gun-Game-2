@@ -172,6 +172,10 @@ let menuRefresh = null; // set by setupMenu so auth changes can refresh the menu
 let account = null; // { user, token } when logged in
 let authToken = localStorage.getItem('bf_token') || null;
 let pendingRequests = [];   // incoming friend requests (account mode)
+let myWins = 0, myKills = 0; // account stats (drive rank)
+function xpOf(w, k) { return (w || 0) * 100 + (k || 0) * 5; }
+const RANK_TIERS = [[0, 'BRONZE'], [300, 'SILVER'], [900, 'GOLD'], [2000, 'PLATINUM'], [4000, 'DIAMOND'], [8000, 'MASTER']];
+function rankOf(w, k) { const xp = xpOf(w, k); let tier = 'BRONZE'; for (const [th, n] of RANK_TIERS) if (xp >= th) tier = n; return { tier, level: 1 + Math.floor(Math.sqrt(xp / 25)) }; }
 let syncTimer = null;
 function presenceId() { return account ? account.user : myPid; }
 // Send a message over whichever socket is live (game in-game, else lobby).
@@ -575,7 +579,7 @@ function renderLeaderboard(list) {
   if (!list.length) { box.innerHTML = '<div class="fempty">No players yet.</div>'; return; }
   list.forEach((e, i) => {
     const row = document.createElement('div'); row.className = 'lrow';
-    row.innerHTML = `<span class="lrank">${i + 1}</span><span class="lname">${e.user}</span><span class="lwin">${e.wins} W</span><span class="lco">${e.coins} ${COIN}</span>`;
+    row.innerHTML = `<span class="lrank">${i + 1}</span><span class="lname">${e.user}</span><span class="ltier">${rankOf(e.wins, e.kills).tier}</span><span class="lwin">${e.wins}W</span><span class="lco">${e.coins} ${COIN}</span>`;
     box.appendChild(row);
   });
 }
@@ -644,6 +648,7 @@ function onAuth(m) {
     unlocked = new Set((pr.unlocked && pr.unlocked.length) ? pr.unlocked : ['soldier']); unlocked.add('soldier');
     friends = Array.isArray(pr.friends) ? pr.friends.map(u => ({ code: u, name: u })) : [];
     pendingRequests = Array.isArray(pr.requests) ? pr.requests : [];
+    myWins = pr.wins || 0; myKills = pr.kills || 0;
     if (!isUnlocked(myAgent)) { myAgent = 'soldier'; localStorage.setItem('blockade_agent', 'soldier'); }
     if (msg) msg.textContent = '';
     if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: m.user }));
@@ -669,7 +674,7 @@ function logout() {
   try { const u = JSON.parse(localStorage.getItem('bf_unlocked')); unlocked = new Set(Array.isArray(u) ? u : ['soldier']); } catch { unlocked = new Set(['soldier']); }
   unlocked.add('soldier');
   try { const f = JSON.parse(localStorage.getItem('bf_friends')); friends = Array.isArray(f) ? f : []; } catch { friends = []; }
-  pendingRequests = [];
+  pendingRequests = []; myWins = 0; myKills = 0;
   if (!isUnlocked(myAgent)) { myAgent = 'soldier'; localStorage.setItem('blockade_agent', 'soldier'); }
   if (lobbyWs && lobbyWs.readyState === 1) lobbyWs.send(JSON.stringify({ t: 'hello', pid: presenceId(), name: (localStorage.getItem('blockade_name') || 'Player') }));
   renderAuth(); renderRequests(); if (menuRefresh) menuRefresh(); requestPresence();
@@ -677,8 +682,11 @@ function logout() {
 function renderAuth() {
   const inEl = $('authLoggedOut'), outEl = $('authLoggedIn');
   if (!inEl || !outEl) return;
-  if (account) { inEl.style.display = 'none'; outEl.style.display = 'flex'; $('authWho').textContent = account.user; }
-  else { inEl.style.display = 'flex'; outEl.style.display = 'none'; }
+  if (account) {
+    inEl.style.display = 'none'; outEl.style.display = 'flex'; $('authWho').textContent = account.user;
+    const rk = rankOf(myWins, myKills), re = $('authRank');
+    if (re) re.textContent = `${rk.tier} · Lv ${rk.level} · ${myWins}W / ${myKills}K`;
+  } else { inEl.style.display = 'flex'; outEl.style.display = 'none'; }
 }
 
 // Leave the current match and go back to the main menu.

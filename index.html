@@ -105,6 +105,8 @@
   #authPanel .arow button, #authPanel #logoutBtn { flex: 1; background: #e9c65a; color: #2a1c00; border: 2px solid #000; font-family: inherit; font-size: 9px; padding: 8px; cursor: pointer; }
   #authPanel .amsg { color: #ff9a9a; font-size: 8px; text-align: center; min-height: 10px; }
   #authPanel #authWho { color: #ffd24a; }
+  #authPanel .arank { color: #7dd3fc; font-size: 9px; letter-spacing: 1px; text-align: center; }
+  #leaderList .ltier { color: #7dd3fc; font-size: 8px; min-width: 58px; }
   #friendsPanel { display: none; flex-direction: column; gap: 8px; width: min(420px, 92vw); margin: 8px auto 0;
     background: rgba(6,14,30,.72); border: 2px solid #2a3a5c; padding: 12px; }
   #friendsPanel.open { display: flex; }
@@ -429,6 +431,7 @@
       </div>
       <div id="authLoggedIn" class="authbox">
         <div>Logged in as <b id="authWho">—</b></div>
+        <div id="authRank" class="arank">—</div>
         <button id="logoutBtn">LOG OUT</button>
       </div>
     </div>

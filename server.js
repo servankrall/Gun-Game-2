@@ -232,7 +232,7 @@ export class GameServer extends DurableObject {
     let h = 5381; for (let i = 0; i < msg.length; i++) h = ((h << 5) + h + msg.charCodeAt(i)) | 0; // fallback (non-secure ctx)
     return 'x' + (h >>> 0).toString(16);
   }
-  profileOf(a) { return { coins: a.coins || 0, unlocked: a.unlocked || ['soldier'], friends: a.friends || [], wins: a.wins || 0, requests: a.requests || [], lastDaily: a.lastDaily || 0 }; }
+  profileOf(a) { return { coins: a.coins || 0, unlocked: a.unlocked || ['soldier'], friends: a.friends || [], wins: a.wins || 0, kills: a.kills || 0, requests: a.requests || [], lastDaily: a.lastDaily || 0 }; }
   async _list(prefix) { // works for DO storage and the in-memory offline fallback
     if (this.ctx?.storage) { const map = await this.ctx.storage.list({ prefix }); return [...map.values()]; }
     this._mem ||= new Map(); const out = []; for (const [k, v] of this._mem) if (k.startsWith(prefix)) out.push(v); return out;
@@ -243,7 +243,7 @@ export class GameServer extends DurableObject {
     if (String(pass || '').length < 4) return { ok: false, error: 'Password too short (min 4)' };
     if (await this._get('acct:' + user)) return { ok: false, error: 'Username taken' };
     const salt = this.randHex(8);
-    const acct = { user, salt, hash: await this.hashPass(pass, salt), coins: 0, unlocked: ['soldier'], friends: [], requests: [], wins: 0, lastDaily: 0 };
+    const acct = { user, salt, hash: await this.hashPass(pass, salt), coins: 0, unlocked: ['soldier'], friends: [], requests: [], wins: 0, kills: 0, lastDaily: 0 };
     await this._put('acct:' + user, acct);
     const token = this.randHex(16); await this._put('tok:' + token, user);
     return { ok: true, user, token, profile: this.profileOf(acct) };
@@ -310,14 +310,17 @@ export class GameServer extends DurableObject {
   }
   async leaderboard() {
     const accts = await this._list('acct:');
-    return accts.map(a => ({ user: a.user, wins: a.wins || 0, coins: a.coins || 0 }))
-      .sort((x, y) => (y.wins - x.wins) || (y.coins - x.coins)).slice(0, 10);
+    return accts.map(a => ({ user: a.user, wins: a.wins || 0, kills: a.kills || 0, coins: a.coins || 0 }))
+      .sort((x, y) => (y.wins - x.wins) || (y.kills - x.kills) || (y.coins - x.coins)).slice(0, 10);
   }
-  awardWins(r, winnerTeam, winnerName) {
+  // At match end, credit logged-in players: +1 win to the winners, and everyone's
+  // match kills toward their lifetime total (drives rank).
+  awardStats(r, winnerTeam, winnerName) {
     for (const c of r.clients.values()) {
       const p = c.player; if (!p.acct) continue;
       const won = winnerName ? (p.name === winnerName) : (p.team === winnerTeam);
-      if (won) this._get('acct:' + p.acct).then(a => { if (a) { a.wins = (a.wins || 0) + 1; this._put('acct:' + p.acct, a); } }).catch(() => {});
+      const kills = p.kills || 0;
+      this._get('acct:' + p.acct).then(a => { if (a) { if (won) a.wins = (a.wins || 0) + 1; a.kills = (a.kills || 0) + kills; this._put('acct:' + p.acct, a); } }).catch(() => {});
     }
   }
 
@@ -629,7 +632,7 @@ export class GameServer extends DurableObject {
 
   endMatch(r, winner, winnerName) {
     r.over = true;
-    this.awardWins(r, winner, winnerName); // +1 win on the leaderboard for logged-in winners
+    this.awardStats(r, winner, winnerName); // credit wins + kills to logged-in players' accounts
     this.broadcast(r, { t: 'matchover', winner, winnerName: winnerName || null, scores: r.scores });
     setTimeout(() => this.resetMatch(r), 6000);
   }
