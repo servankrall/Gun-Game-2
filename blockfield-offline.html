@@ -142,6 +142,17 @@
   #leaderList .lname { flex: 1; color: #fff; }
   #leaderList .lwin { color: #49c26a; }
   #leaderList .lco { color: #ffd24a; }
+  #awardsPanel { display: none; flex-direction: column; gap: 6px; width: min(420px, 92vw); margin: 8px auto 0;
+    background: rgba(6,14,30,.72); border: 2px solid #2a3a5c; padding: 12px; }
+  #awardsPanel.open { display: flex; }
+  #awardsList { display: flex; flex-direction: column; gap: 4px; }
+  #awardsList .arow { display: flex; align-items: center; gap: 10px; font-size: 9px; padding: 6px 8px; background: rgba(255,255,255,.05); }
+  #awardsList .arow.have { background: rgba(255,210,74,.12); }
+  #awardsList .amark { width: 14px; color: #55607a; }
+  #awardsList .arow.have .amark { color: #ffd24a; }
+  #awardsList .aname { flex: 1; color: #cfd6e6; }
+  #awardsList .arow.have .aname { color: #fff; }
+  #awardsList .arew { color: #ffd24a; }
   #menu .ver { position: absolute; left: 8px; bottom: 6px; color: #5d6a86; font-size: 8px; }
   #menu .credit { position: absolute; right: 8px; bottom: 6px; color: #8090ad; font-size: 8px; text-shadow: 1px 1px 0 #000; }
   @media (max-width: 760px) { .hide-sm { display: none; } #agentCard { width: 210px; height: 350px; } .pslot { height: 300px; } }
@@ -400,6 +411,7 @@
         <button id="friendsBtn" class="linkbtn">FRIENDS</button>
         <button id="authBtn" class="linkbtn">ACCOUNT</button>
         <button id="leaderBtn" class="linkbtn">LEADERBOARD</button>
+        <button id="awardsBtn" class="linkbtn">AWARDS</button>
         <button id="dailyBtn" class="linkbtn">DAILY +100 <span class="coin"></span></button>
         <div id="dailyMsg" class="dailymsg"></div>
       </div>
@@ -432,6 +444,11 @@
     <div id="leaderPanel">
       <div class="ltitle">LEADERBOARD <span class="asub">(top by wins, then coins)</span></div>
       <div id="leaderList"></div>
+    </div>
+
+    <div id="awardsPanel">
+      <div class="ltitle">ACHIEVEMENTS</div>
+      <div id="awardsList"></div>
     </div>
 
     <div id="optPanel">
@@ -472,6 +489,7 @@
     <div id="matchOver">
       <div class="t" id="matchOverTitle">RED TEAM WINS</div>
       <div class="s" id="matchOverSub"></div>
+      <div class="s" id="matchStats"></div>
       <button class="mc-btn" id="menuBtnOver">MAIN MENU</button>
     </div>
     <div id="killfeed"></div>
@@ -1733,6 +1751,7 @@ function unlockAch(id) {
   achievements.add(id); localStorage.setItem('bf_ach', JSON.stringify([...achievements]));
   feed('★ ACHIEVEMENT: ' + a.name + (a.reward ? ' (+' + a.reward + ' coins)' : ''), myTeam);
   try { SND.kill(); } catch {}
+  renderAchievements();
   if (a.reward) awardCoins(a.reward);
 }
 // ---- persistent identity + friends (friend code = your player id) ----
@@ -1776,6 +1795,7 @@ const agentArtSVG = (h) => `<svg viewBox="0 0 20 24" shape-rendering="crispEdges
 let killStreak = 0;
 let multiKill = 0, lastKillTime = 0;   // rapid-frag (multi-kill) tracking
 let firstBloodDone = false;            // first kill of the current match
+let matchKills = 0, matchDeaths = 0, bestStreak = 0; // per-match personal stats
 let lookMul = parseFloat(localStorage.getItem('bf_sens') || '1') || 1;
 let fov = Math.max(60, Math.min(100, parseInt(localStorage.getItem('bf_fov')) || 70));
 let sndVol = (() => { const v = parseFloat(localStorage.getItem('bf_vol')); return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.8; })();
@@ -2071,6 +2091,11 @@ function setupMenu() {
   // ---- leaderboard ----
   const lb = $('leaderBtn');
   if (lb) lb.addEventListener('click', () => { $('leaderPanel').classList.toggle('open'); connectLobby(); authSend({ t: 'leaderboard' }); });
+
+  // ---- achievements panel ----
+  const aw = $('awardsBtn');
+  if (aw) aw.addEventListener('click', () => { $('awardsPanel').classList.toggle('open'); renderAchievements(); });
+  renderAchievements();
 }
 
 // ============================================================
@@ -2146,6 +2171,16 @@ function renderLeaderboard(list) {
     row.innerHTML = `<span class="lrank">${i + 1}</span><span class="lname">${e.user}</span><span class="lwin">${e.wins} W</span><span class="lco">${e.coins} ${COIN}</span>`;
     box.appendChild(row);
   });
+}
+function renderAchievements() {
+  const box = $('awardsList'); if (!box) return;
+  box.innerHTML = '';
+  for (const [id, a] of Object.entries(ACHIEVEMENTS)) {
+    const have = achievements.has(id);
+    const row = document.createElement('div'); row.className = 'arow' + (have ? ' have' : '');
+    row.innerHTML = `<span class="amark">${have ? '★' : '·'}</span><span class="aname">${a.name}</span>` + (a.reward ? `<span class="arew">+${a.reward} ${COIN}</span>` : '');
+    box.appendChild(row);
+  }
 }
 // Account/social messages that can arrive on either socket.
 function handleAccountMsg(m) {
@@ -2307,6 +2342,7 @@ function handleMsg(m) {
       if (gameMode === 'gg') { myLevel = 0; }
       startGame();
       matchStart = performance.now();
+      matchKills = 0; matchDeaths = 0; bestStreak = 0;
       setGunGameUI(gameMode === 'gg');
       if (gameMode === 'gg') applyGunGameWeapon();
       feed('MAP: ' + (THEMES[mapTheme]?.name || mapTheme), myTeam);
@@ -2324,7 +2360,7 @@ function handleMsg(m) {
     case 'flag': {
       const tn = m.team === 'red' ? 'Red' : 'Blue';
       if (m.ev === 'pickup') { feed(`${m.name || 'Someone'} grabbed the ${tn} flag!`, m.team); SND.spawn(); }
-      else if (m.ev === 'capture') { feed(`${m.name || 'Someone'} captured the ${tn} flag! 🚩`, m.team); SND.kill(); announce('FLAG CAPTURED!', '#ffd24a'); }
+      else if (m.ev === 'capture') { feed(`${m.name || 'Someone'} captured the ${tn} flag!`, m.team); SND.kill(); announce('FLAG CAPTURED!', '#ffd24a'); }
       else if (m.ev === 'returned') { feed(`The ${tn} flag was returned.`, m.team); }
       else if (m.ev === 'drop') { feed(`The ${tn} flag was dropped!`, m.team); }
       break;
@@ -2398,13 +2434,13 @@ function handleMsg(m) {
       }
       if (killer) killer.kills++;
       if (m.victim === myId) {
-        me.hp = 0; me.dead = true; me.deaths++;
+        me.hp = 0; me.dead = true; me.deaths++; matchDeaths++;
         killStreak = 0; multiKill = 0;
         updateHearts();
         SND.death();
         showDeathScreen(kName);
       }
-      if (m.killer === myId && m.victim !== myId) { me.kills++; SND.kill(); onMyKill(); }
+      if (m.killer === myId && m.victim !== myId) { me.kills++; matchKills++; SND.kill(); onMyKill(); }
       break;
     }
     case 'level': {
@@ -2481,6 +2517,7 @@ function handleMsg(m) {
       $('scoreRed').textContent = scores.red;
       $('scoreBlue').textContent = scores.blue;
       killStreak = 0; multiKill = 0; firstBloodDone = false;
+      matchKills = 0; matchDeaths = 0; bestStreak = 0;
       matchStart = performance.now();
       hideMatchOver();
       resetWorld();
@@ -2501,6 +2538,7 @@ function updateCount(n) {
 }
 function showMatchOver(winner, sc, winnerName) {
   if (sc) { Object.assign(scores, sc); $('scoreRed').textContent = scores.red; $('scoreBlue').textContent = scores.blue; }
+  const st = $('matchStats'); if (st) st.textContent = `You — ${matchKills} kills · ${matchDeaths} deaths · best streak ${bestStreak}`;
   const o = $('matchOver');
   if (gameMode === 'gg') {
     const win = (winnerName && winnerName === myName);
@@ -2535,6 +2573,7 @@ const MULTI_WINDOW = 4000;
 function onMyKill() {
   const now = performance.now();
   killStreak++;
+  if (killStreak > bestStreak) bestStreak = killStreak;
   multiKill = (now - lastKillTime < MULTI_WINDOW) ? multiKill + 1 : 1;
   lastKillTime = now;
   let msg = null, col = '#ff7733';

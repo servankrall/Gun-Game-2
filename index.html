@@ -142,6 +142,17 @@
   #leaderList .lname { flex: 1; color: #fff; }
   #leaderList .lwin { color: #49c26a; }
   #leaderList .lco { color: #ffd24a; }
+  #awardsPanel { display: none; flex-direction: column; gap: 6px; width: min(420px, 92vw); margin: 8px auto 0;
+    background: rgba(6,14,30,.72); border: 2px solid #2a3a5c; padding: 12px; }
+  #awardsPanel.open { display: flex; }
+  #awardsList { display: flex; flex-direction: column; gap: 4px; }
+  #awardsList .arow { display: flex; align-items: center; gap: 10px; font-size: 9px; padding: 6px 8px; background: rgba(255,255,255,.05); }
+  #awardsList .arow.have { background: rgba(255,210,74,.12); }
+  #awardsList .amark { width: 14px; color: #55607a; }
+  #awardsList .arow.have .amark { color: #ffd24a; }
+  #awardsList .aname { flex: 1; color: #cfd6e6; }
+  #awardsList .arow.have .aname { color: #fff; }
+  #awardsList .arew { color: #ffd24a; }
   #menu .ver { position: absolute; left: 8px; bottom: 6px; color: #5d6a86; font-size: 8px; }
   #menu .credit { position: absolute; right: 8px; bottom: 6px; color: #8090ad; font-size: 8px; text-shadow: 1px 1px 0 #000; }
   @media (max-width: 760px) { .hide-sm { display: none; } #agentCard { width: 210px; height: 350px; } .pslot { height: 300px; } }
@@ -400,6 +411,7 @@
         <button id="friendsBtn" class="linkbtn">FRIENDS</button>
         <button id="authBtn" class="linkbtn">ACCOUNT</button>
         <button id="leaderBtn" class="linkbtn">LEADERBOARD</button>
+        <button id="awardsBtn" class="linkbtn">AWARDS</button>
         <button id="dailyBtn" class="linkbtn">DAILY +100 <span class="coin"></span></button>
         <div id="dailyMsg" class="dailymsg"></div>
       </div>
@@ -432,6 +444,11 @@
     <div id="leaderPanel">
       <div class="ltitle">LEADERBOARD <span class="asub">(top by wins, then coins)</span></div>
       <div id="leaderList"></div>
+    </div>
+
+    <div id="awardsPanel">
+      <div class="ltitle">ACHIEVEMENTS</div>
+      <div id="awardsList"></div>
     </div>
 
     <div id="optPanel">
@@ -472,6 +489,7 @@
     <div id="matchOver">
       <div class="t" id="matchOverTitle">RED TEAM WINS</div>
       <div class="s" id="matchOverSub"></div>
+      <div class="s" id="matchStats"></div>
       <button class="mc-btn" id="menuBtnOver">MAIN MENU</button>
     </div>
     <div id="killfeed"></div>

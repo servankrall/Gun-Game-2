@@ -158,6 +158,7 @@ function unlockAch(id) {
   achievements.add(id); localStorage.setItem('bf_ach', JSON.stringify([...achievements]));
   feed('★ ACHIEVEMENT: ' + a.name + (a.reward ? ' (+' + a.reward + ' coins)' : ''), myTeam);
   try { SND.kill(); } catch {}
+  renderAchievements();
   if (a.reward) awardCoins(a.reward);
 }
 // ---- persistent identity + friends (friend code = your player id) ----
@@ -201,6 +202,7 @@ const agentArtSVG = (h) => `<svg viewBox="0 0 20 24" shape-rendering="crispEdges
 let killStreak = 0;
 let multiKill = 0, lastKillTime = 0;   // rapid-frag (multi-kill) tracking
 let firstBloodDone = false;            // first kill of the current match
+let matchKills = 0, matchDeaths = 0, bestStreak = 0; // per-match personal stats
 let lookMul = parseFloat(localStorage.getItem('bf_sens') || '1') || 1;
 let fov = Math.max(60, Math.min(100, parseInt(localStorage.getItem('bf_fov')) || 70));
 let sndVol = (() => { const v = parseFloat(localStorage.getItem('bf_vol')); return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.8; })();
@@ -496,6 +498,11 @@ function setupMenu() {
   // ---- leaderboard ----
   const lb = $('leaderBtn');
   if (lb) lb.addEventListener('click', () => { $('leaderPanel').classList.toggle('open'); connectLobby(); authSend({ t: 'leaderboard' }); });
+
+  // ---- achievements panel ----
+  const aw = $('awardsBtn');
+  if (aw) aw.addEventListener('click', () => { $('awardsPanel').classList.toggle('open'); renderAchievements(); });
+  renderAchievements();
 }
 
 // ============================================================
@@ -571,6 +578,16 @@ function renderLeaderboard(list) {
     row.innerHTML = `<span class="lrank">${i + 1}</span><span class="lname">${e.user}</span><span class="lwin">${e.wins} W</span><span class="lco">${e.coins} ${COIN}</span>`;
     box.appendChild(row);
   });
+}
+function renderAchievements() {
+  const box = $('awardsList'); if (!box) return;
+  box.innerHTML = '';
+  for (const [id, a] of Object.entries(ACHIEVEMENTS)) {
+    const have = achievements.has(id);
+    const row = document.createElement('div'); row.className = 'arow' + (have ? ' have' : '');
+    row.innerHTML = `<span class="amark">${have ? '★' : '·'}</span><span class="aname">${a.name}</span>` + (a.reward ? `<span class="arew">+${a.reward} ${COIN}</span>` : '');
+    box.appendChild(row);
+  }
 }
 // Account/social messages that can arrive on either socket.
 function handleAccountMsg(m) {
@@ -732,6 +749,7 @@ function handleMsg(m) {
       if (gameMode === 'gg') { myLevel = 0; }
       startGame();
       matchStart = performance.now();
+      matchKills = 0; matchDeaths = 0; bestStreak = 0;
       setGunGameUI(gameMode === 'gg');
       if (gameMode === 'gg') applyGunGameWeapon();
       feed('MAP: ' + (THEMES[mapTheme]?.name || mapTheme), myTeam);
@@ -749,7 +767,7 @@ function handleMsg(m) {
     case 'flag': {
       const tn = m.team === 'red' ? 'Red' : 'Blue';
       if (m.ev === 'pickup') { feed(`${m.name || 'Someone'} grabbed the ${tn} flag!`, m.team); SND.spawn(); }
-      else if (m.ev === 'capture') { feed(`${m.name || 'Someone'} captured the ${tn} flag! 🚩`, m.team); SND.kill(); announce('FLAG CAPTURED!', '#ffd24a'); }
+      else if (m.ev === 'capture') { feed(`${m.name || 'Someone'} captured the ${tn} flag!`, m.team); SND.kill(); announce('FLAG CAPTURED!', '#ffd24a'); }
       else if (m.ev === 'returned') { feed(`The ${tn} flag was returned.`, m.team); }
       else if (m.ev === 'drop') { feed(`The ${tn} flag was dropped!`, m.team); }
       break;
@@ -823,13 +841,13 @@ function handleMsg(m) {
       }
       if (killer) killer.kills++;
       if (m.victim === myId) {
-        me.hp = 0; me.dead = true; me.deaths++;
+        me.hp = 0; me.dead = true; me.deaths++; matchDeaths++;
         killStreak = 0; multiKill = 0;
         updateHearts();
         SND.death();
         showDeathScreen(kName);
       }
-      if (m.killer === myId && m.victim !== myId) { me.kills++; SND.kill(); onMyKill(); }
+      if (m.killer === myId && m.victim !== myId) { me.kills++; matchKills++; SND.kill(); onMyKill(); }
       break;
     }
     case 'level': {
@@ -906,6 +924,7 @@ function handleMsg(m) {
       $('scoreRed').textContent = scores.red;
       $('scoreBlue').textContent = scores.blue;
       killStreak = 0; multiKill = 0; firstBloodDone = false;
+      matchKills = 0; matchDeaths = 0; bestStreak = 0;
       matchStart = performance.now();
       hideMatchOver();
       resetWorld();
@@ -926,6 +945,7 @@ function updateCount(n) {
 }
 function showMatchOver(winner, sc, winnerName) {
   if (sc) { Object.assign(scores, sc); $('scoreRed').textContent = scores.red; $('scoreBlue').textContent = scores.blue; }
+  const st = $('matchStats'); if (st) st.textContent = `You — ${matchKills} kills · ${matchDeaths} deaths · best streak ${bestStreak}`;
   const o = $('matchOver');
   if (gameMode === 'gg') {
     const win = (winnerName && winnerName === myName);
@@ -960,6 +980,7 @@ const MULTI_WINDOW = 4000;
 function onMyKill() {
   const now = performance.now();
   killStreak++;
+  if (killStreak > bestStreak) bestStreak = killStreak;
   multiKill = (now - lastKillTime < MULTI_WINDOW) ? multiKill + 1 : 1;
   lastKillTime = now;
   let msg = null, col = '#ff7733';
