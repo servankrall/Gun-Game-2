@@ -748,8 +748,13 @@ const clampArena = v => Math.max(-HALF + 1.5, Math.min(HALF - 2.5, v));
 // Health packs at fixed open spots (same on every map). Walk over one at <100 HP
 // to heal; it respawns after a delay.
 const PICKUP_SPOTS = [[0, 16], [0, -16], [16, 0], [-16, 0]];
+const SUPPLY_SPOTS = [[10, -10], [-10, 10]]; // grenade + block resupply
 const PICKUP_HEAL = 40, PICKUP_RESPAWN = 12000;
-function makePickups(r) { return PICKUP_SPOTS.map(([x, z]) => ({ x, y: groundTop(r, x, z) + 0.6, z, active: true, respawnAt: 0 })); }
+function makePickups(r) {
+  const health = PICKUP_SPOTS.map(([x, z]) => ({ x, y: groundTop(r, x, z) + 0.6, z, active: true, respawnAt: 0, type: 'health' }));
+  const supply = SUPPLY_SPOTS.map(([x, z]) => ({ x, y: groundTop(r, x, z) + 0.6, z, active: true, respawnAt: 0, type: 'supply' }));
+  return health.concat(supply);
+}
 
 class GameServer {
   constructor() {
@@ -980,7 +985,7 @@ class GameServer {
       t: 'welcome', id, team, pos, ry: player.ry, scores: r.scores, room: roomId, count: this.count(r),
       mode: r.mode, map: r.map, limit: r.mode === 'ctf' ? CFG.captureLimit : r.mode === 'gg' ? GG_LADDER.length : CFG.scoreLimit,
       flags: r.flags ? this.flagPub(r) : undefined,
-      pickups: r.pickups.map(p => ({ x: p.x, y: p.y, z: p.z, active: p.active })),
+      pickups: r.pickups.map(p => ({ x: p.x, y: p.y, z: p.z, active: p.active, type: p.type })),
       players: this.entities(r).filter(e => e.id !== id).map(e => this.pub(e)),
       placed: [...r.placed.values()], destroyed: [...r.destroyed.values()],
     });
@@ -1166,8 +1171,16 @@ class GameServer {
       if (!pk.active) { if (now >= pk.respawnAt) { pk.active = true; this.broadcast(r, { t: 'pickup', i, active: true }); } continue; }
       for (const c of r.clients.values()) {
         const p = c.player;
-        if (!p.alive || p.hp >= 100) continue;
-        if ((p.pos.x - pk.x) ** 2 + (p.pos.z - pk.z) ** 2 < 1.6 && Math.abs(p.pos.y - pk.y) < 2.2) {
+        if (!p.alive) continue;
+        const near = (p.pos.x - pk.x) ** 2 + (p.pos.z - pk.z) ** 2 < 1.6 && Math.abs(p.pos.y - pk.y) < 2.2;
+        if (!near) continue;
+        if (pk.type === 'supply') {
+          pk.active = false; pk.respawnAt = now + PICKUP_RESPAWN;
+          this.send(c.ws, { t: 'supply' }); // client refills its own grenades + blocks
+          this.broadcast(r, { t: 'pickup', i, active: false });
+          break;
+        } else {
+          if (p.hp >= 100) continue;
           p.hp = Math.min(100, p.hp + PICKUP_HEAL); p.lastHit = now;
           pk.active = false; pk.respawnAt = now + PICKUP_RESPAWN;
           this.send(c.ws, { t: 'heal', hp: Math.round(p.hp) });
@@ -2403,6 +2416,7 @@ function handleMsg(m) {
     }
     case 'pong': dbgOnPong(m); break;
     case 'pickup': { const pm = pickupMeshes[m.i]; if (pm) pm.mesh.visible = m.active !== false; if (m.active === false) SND.spawn(); break; }
+    case 'supply': { me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.blocks = AGENTS[myAgent]?.blocks || 64; updateAmmoHud(); updateHotbar(); SND.spawn(); announce('SUPPLIES!', '#7dd3fc'); break; }
     case 'flag': {
       const tn = m.team === 'red' ? 'Red' : 'Blue';
       if (m.ev === 'pickup') { feed(`${m.name || 'Someone'} grabbed the ${tn} flag!`, m.team); SND.spawn(); }
@@ -2810,11 +2824,19 @@ function makeHealthPack() {
   const tex = new THREE.CanvasTexture(c); tex.magFilter = tex.minFilter = THREE.NearestFilter;
   return new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshBasicMaterial({ map: tex }));
 }
+function makeSupplyCrate() {
+  const c = document.createElement('canvas'); c.width = c.height = 16; const g = c.getContext('2d');
+  g.fillStyle = '#4a5a2a'; g.fillRect(0, 0, 16, 16);
+  g.fillStyle = '#2e3a1a'; g.fillRect(0, 0, 16, 1); g.fillRect(0, 15, 16, 1); g.fillRect(0, 0, 1, 16); g.fillRect(15, 0, 1, 16);
+  g.fillStyle = '#d9c56a'; g.fillRect(3, 6, 2, 7); g.fillRect(7, 6, 2, 7); g.fillRect(11, 6, 2, 7);
+  const tex = new THREE.CanvasTexture(c); tex.magFilter = tex.minFilter = THREE.NearestFilter;
+  return new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshBasicMaterial({ map: tex }));
+}
 function buildPickups(list) {
   for (const pm of pickupMeshes) scene.remove(pm.mesh);
   pickupMeshes = [];
   for (const pk of list || []) {
-    const mesh = makeHealthPack();
+    const mesh = pk.type === 'supply' ? makeSupplyCrate() : makeHealthPack();
     mesh.position.set(pk.x, pk.y + 0.1, pk.z);
     mesh.visible = pk.active !== false;
     scene.add(mesh);

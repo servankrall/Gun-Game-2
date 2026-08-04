@@ -189,8 +189,13 @@ const clampArena = v => Math.max(-HALF + 1.5, Math.min(HALF - 2.5, v));
 // Health packs at fixed open spots (same on every map). Walk over one at <100 HP
 // to heal; it respawns after a delay.
 const PICKUP_SPOTS = [[0, 16], [0, -16], [16, 0], [-16, 0]];
+const SUPPLY_SPOTS = [[10, -10], [-10, 10]]; // grenade + block resupply
 const PICKUP_HEAL = 40, PICKUP_RESPAWN = 12000;
-function makePickups(r) { return PICKUP_SPOTS.map(([x, z]) => ({ x, y: groundTop(r, x, z) + 0.6, z, active: true, respawnAt: 0 })); }
+function makePickups(r) {
+  const health = PICKUP_SPOTS.map(([x, z]) => ({ x, y: groundTop(r, x, z) + 0.6, z, active: true, respawnAt: 0, type: 'health' }));
+  const supply = SUPPLY_SPOTS.map(([x, z]) => ({ x, y: groundTop(r, x, z) + 0.6, z, active: true, respawnAt: 0, type: 'supply' }));
+  return health.concat(supply);
+}
 
 export class GameServer extends DurableObject {
   constructor(ctx, env) {
@@ -432,7 +437,7 @@ export class GameServer extends DurableObject {
       t: 'welcome', id, team, pos, ry: player.ry, scores: r.scores, room: roomId, count: this.count(r),
       mode: r.mode, map: r.map, limit: r.mode === 'ctf' ? CFG.captureLimit : r.mode === 'gg' ? GG_LADDER.length : CFG.scoreLimit,
       flags: r.flags ? this.flagPub(r) : undefined,
-      pickups: r.pickups.map(p => ({ x: p.x, y: p.y, z: p.z, active: p.active })),
+      pickups: r.pickups.map(p => ({ x: p.x, y: p.y, z: p.z, active: p.active, type: p.type })),
       players: this.entities(r).filter(e => e.id !== id).map(e => this.pub(e)),
       placed: [...r.placed.values()], destroyed: [...r.destroyed.values()],
     });
@@ -618,8 +623,16 @@ export class GameServer extends DurableObject {
       if (!pk.active) { if (now >= pk.respawnAt) { pk.active = true; this.broadcast(r, { t: 'pickup', i, active: true }); } continue; }
       for (const c of r.clients.values()) {
         const p = c.player;
-        if (!p.alive || p.hp >= 100) continue;
-        if ((p.pos.x - pk.x) ** 2 + (p.pos.z - pk.z) ** 2 < 1.6 && Math.abs(p.pos.y - pk.y) < 2.2) {
+        if (!p.alive) continue;
+        const near = (p.pos.x - pk.x) ** 2 + (p.pos.z - pk.z) ** 2 < 1.6 && Math.abs(p.pos.y - pk.y) < 2.2;
+        if (!near) continue;
+        if (pk.type === 'supply') {
+          pk.active = false; pk.respawnAt = now + PICKUP_RESPAWN;
+          this.send(c.ws, { t: 'supply' }); // client refills its own grenades + blocks
+          this.broadcast(r, { t: 'pickup', i, active: false });
+          break;
+        } else {
+          if (p.hp >= 100) continue;
           p.hp = Math.min(100, p.hp + PICKUP_HEAL); p.lastHit = now;
           pk.active = false; pk.respawnAt = now + PICKUP_RESPAWN;
           this.send(c.ws, { t: 'heal', hp: Math.round(p.hp) });

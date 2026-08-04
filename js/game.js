@@ -774,6 +774,7 @@ function handleMsg(m) {
     }
     case 'pong': dbgOnPong(m); break;
     case 'pickup': { const pm = pickupMeshes[m.i]; if (pm) pm.mesh.visible = m.active !== false; if (m.active === false) SND.spawn(); break; }
+    case 'supply': { me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.blocks = AGENTS[myAgent]?.blocks || 64; updateAmmoHud(); updateHotbar(); SND.spawn(); announce('SUPPLIES!', '#7dd3fc'); break; }
     case 'flag': {
       const tn = m.team === 'red' ? 'Red' : 'Blue';
       if (m.ev === 'pickup') { feed(`${m.name || 'Someone'} grabbed the ${tn} flag!`, m.team); SND.spawn(); }
@@ -1181,11 +1182,19 @@ function makeHealthPack() {
   const tex = new THREE.CanvasTexture(c); tex.magFilter = tex.minFilter = THREE.NearestFilter;
   return new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshBasicMaterial({ map: tex }));
 }
+function makeSupplyCrate() {
+  const c = document.createElement('canvas'); c.width = c.height = 16; const g = c.getContext('2d');
+  g.fillStyle = '#4a5a2a'; g.fillRect(0, 0, 16, 16);
+  g.fillStyle = '#2e3a1a'; g.fillRect(0, 0, 16, 1); g.fillRect(0, 15, 16, 1); g.fillRect(0, 0, 1, 16); g.fillRect(15, 0, 1, 16);
+  g.fillStyle = '#d9c56a'; g.fillRect(3, 6, 2, 7); g.fillRect(7, 6, 2, 7); g.fillRect(11, 6, 2, 7);
+  const tex = new THREE.CanvasTexture(c); tex.magFilter = tex.minFilter = THREE.NearestFilter;
+  return new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshBasicMaterial({ map: tex }));
+}
 function buildPickups(list) {
   for (const pm of pickupMeshes) scene.remove(pm.mesh);
   pickupMeshes = [];
   for (const pk of list || []) {
-    const mesh = makeHealthPack();
+    const mesh = pk.type === 'supply' ? makeSupplyCrate() : makeHealthPack();
     mesh.position.set(pk.x, pk.y + 0.1, pk.z);
     mesh.visible = pk.active !== false;
     scene.add(mesh);
