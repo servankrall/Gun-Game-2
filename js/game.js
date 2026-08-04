@@ -141,8 +141,25 @@ function isUnlocked(id) { return (AGENTS[id]?.cost || 0) === 0 || unlocked.has(i
 function saveCoins() { if (account) syncAccount(); else localStorage.setItem('bf_coins', String(coins)); }
 function saveUnlocked() { if (account) syncAccount(); else localStorage.setItem('bf_unlocked', JSON.stringify([...unlocked])); }
 const COIN = '<span class="coin"></span>'; // CSS gold-coin icon (emoji renders as tofu in the pixel font)
-function setCoinBal() { const el = $('coinBal'); if (el) el.innerHTML = COIN + coins; }
+function setCoinBal() { const el = $('coinBal'); if (el) el.innerHTML = COIN + coins; if (coins >= 1000) unlockAch('rich'); }
 function awardCoins(n) { coins += n; saveCoins(); setCoinBal(); }
+// ---- achievements (one-off milestones, small coin rewards, persisted) ----
+const ACHIEVEMENTS = {
+  firstkill: { name: 'FIRST BLOOD', reward: 20 },
+  spree5:    { name: 'KILLING SPREE', reward: 40 },
+  win:       { name: 'WINNER', reward: 60 },
+  ggwin:     { name: 'GUN GOD', reward: 80 },
+  unlockall: { name: 'COLLECTOR', reward: 150 },
+  rich:      { name: 'TYCOON', reward: 0 },
+};
+let achievements = (() => { try { const a = JSON.parse(localStorage.getItem('bf_ach')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
+function unlockAch(id) {
+  const a = ACHIEVEMENTS[id]; if (!a || achievements.has(id)) return;
+  achievements.add(id); localStorage.setItem('bf_ach', JSON.stringify([...achievements]));
+  feed('★ ACHIEVEMENT: ' + a.name + (a.reward ? ' (+' + a.reward + ' coins)' : ''), myTeam);
+  try { SND.kill(); } catch {}
+  if (a.reward) awardCoins(a.reward);
+}
 // ---- persistent identity + friends (friend code = your player id) ----
 let myPid = localStorage.getItem('bf_pid');
 if (!myPid) { myPid = Math.random().toString(36).slice(2, 8).toUpperCase(); localStorage.setItem('bf_pid', myPid); }
@@ -198,7 +215,21 @@ function applyCrosshair() {
 }
 applyCrosshair();
 
-const tracers = [], particles = [], flashes = [], rockets = [], grenades = [];
+const tracers = [], particles = [], flashes = [], rockets = [], grenades = [], dmgTexts = [];
+function spawnDamageNumber(pos, dmg, head) {
+  if (dmgTexts.length > 40) { const d = dmgTexts.shift(); scene.remove(d.obj); d.obj.material.map.dispose(); d.obj.material.dispose(); }
+  const c = document.createElement('canvas'); c.width = 64; c.height = 40;
+  const g = c.getContext('2d');
+  g.font = 'bold 26px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.lineWidth = 5; g.strokeStyle = '#000'; g.strokeText(dmg, 32, 20);
+  g.fillStyle = head ? '#ffdd55' : '#ffffff'; g.fillText(dmg, 32, 20);
+  const tex = new THREE.CanvasTexture(c);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+  sp.position.copy(pos); sp.position.x += (Math.random() - 0.5) * 0.4; sp.position.y += 1.1;
+  sp.scale.set(head ? 1.1 : 0.85, head ? 0.7 : 0.55, 1);
+  scene.add(sp);
+  dmgTexts.push({ obj: sp, ttl: 0.8 });
+}
 
 // ============================================================
 // Audio (tiny synth)
@@ -326,6 +357,7 @@ function setupMenu() {
       myAgent = id; localStorage.setItem('blockade_agent', id);
       if (err) err.textContent = `Unlocked ${AGENTS[id].name}!`;
       renderAgent();
+      if (AGENT_IDS.every(isUnlocked)) unlockAch('unlockall');
     } else {
       if (err) err.innerHTML = `${AGENTS[id].name} is locked — need ${cost - coins} more ${COIN} (you have ${coins})`;
     }
@@ -699,6 +731,7 @@ function handleMsg(m) {
       if (gameMode === 'ctf') { ensureFlags(); if (m.flags) updateFlagMeshes(m.flags); }
       if (gameMode === 'gg') { myLevel = 0; }
       startGame();
+      matchStart = performance.now();
       setGunGameUI(gameMode === 'gg');
       if (gameMode === 'gg') applyGunGameWeapon();
       feed('MAP: ' + (THEMES[mapTheme]?.name || mapTheme), myTeam);
@@ -873,6 +906,7 @@ function handleMsg(m) {
       $('scoreRed').textContent = scores.red;
       $('scoreBlue').textContent = scores.blue;
       killStreak = 0; multiKill = 0; firstBloodDone = false;
+      matchStart = performance.now();
       hideMatchOver();
       resetWorld();
       if (gameMode === 'gg') { myLevel = 0; applyGunGameWeapon(); }
@@ -896,6 +930,7 @@ function showMatchOver(winner, sc, winnerName) {
   if (gameMode === 'gg') {
     const win = (winnerName && winnerName === myName);
     awardCoins(win ? 120 : 40);
+    if (win) { unlockAch('win'); unlockAch('ggwin'); }
     $('matchOverTitle').textContent = (winnerName || 'SOMEONE') + ' WINS!';
     $('matchOverTitle').style.color = win ? '#ffd24a' : (TEAM_COL[winner] || '#fff');
     $('matchOverSub').textContent = (win ? 'You mastered every weapon! ' : 'Beaten to the last weapon. ') + 'Next match starting...';
@@ -904,6 +939,7 @@ function showMatchOver(winner, sc, winnerName) {
   }
   const win = (winner === myTeam);
   awardCoins(win ? 120 : 40);
+  if (win) unlockAch('win');
   $('matchOverTitle').textContent = (winner === 'red' ? 'RED' : 'BLUE') + ' TEAM WINS';
   $('matchOverTitle').style.color = TEAM_COL[winner] || '#fff';
   $('matchOverSub').textContent = (win ? 'Victory! ' : 'Defeat. ') + `${scores.red} : ${scores.blue}  —  next match starting...`;
@@ -931,6 +967,8 @@ function onMyKill() {
   if (SPREE_NAMES[killStreak]) { msg = SPREE_NAMES[killStreak]; col = '#ffd24a'; } // spree milestone wins
   if (msg) announce(msg, col);
   awardCoins(10); // coins toward unlocking classes
+  unlockAch('firstkill');
+  if (killStreak >= 5) unlockAch('spree5');
 }
 
 // ============================================================
@@ -1461,7 +1499,9 @@ function tryShoot(now) {
       const head = hitY > bestPlayer.group.position.y + 1.45;
       let dmg = w.dmg * (head ? 2 : 1);
       netSend({ t: 'hit', target: bestPlayer.id, dmg: Math.round(dmg), w: wkey, head });
-      bloodBurst(new THREE.Vector3(origin.x + dir.x * bestT, hitY, origin.z + dir.z * bestT));
+      const hp = new THREE.Vector3(origin.x + dir.x * bestT, hitY, origin.z + dir.z * bestT);
+      bloodBurst(hp);
+      spawnDamageNumber(hp, Math.round(dmg), head);
     } else if (blockHit) {
       debrisBurst(new THREE.Vector3(origin.x + dir.x * blockHit.dist, origin.y + dir.y * blockHit.dist, origin.z + dir.z * blockHit.dist));
     }
@@ -1493,7 +1533,9 @@ function tryMelee(now) {
   }
   if (bestPlayer) {
     netSend({ t: 'hit', target: bestPlayer.id, dmg: 200, w: 'pickaxe', head: false });
-    bloodBurst(new THREE.Vector3(origin.x + dir.x * bestT, origin.y + dir.y * bestT, origin.z + dir.z * bestT));
+    const hp = new THREE.Vector3(origin.x + dir.x * bestT, origin.y + dir.y * bestT, origin.z + dir.z * bestT);
+    bloodBurst(hp);
+    spawnDamageNumber(hp, 200, true);
     SND.hit();
   } else {
     SND.swing();
@@ -1783,6 +1825,13 @@ function updateFx(dt) {
     p.vel.y -= 12 * dt;
     p.obj.position.addScaledVector(p.vel, dt);
     if (p.ttl <= 0) { scene.remove(p.obj); p.obj.geometry.dispose(); p.obj.material.dispose(); particles.splice(i, 1); }
+  }
+  for (let i = dmgTexts.length - 1; i >= 0; i--) {
+    const d = dmgTexts[i];
+    d.ttl -= dt;
+    d.obj.position.y += dt * 1.3;
+    d.obj.material.opacity = Math.max(0, d.ttl / 0.8);
+    if (d.ttl <= 0) { scene.remove(d.obj); d.obj.material.map.dispose(); d.obj.material.dispose(); dmgTexts.splice(i, 1); }
   }
 }
 
@@ -2395,6 +2444,12 @@ function startGame() {
 // Minimap (top-down radar, rotated so the player faces up)
 // ============================================================
 let miniCtx = null, lastMini = 0, lastLowHp = 0;
+let matchStart = 0;
+function updateMatchTimer() {
+  const el = $('matchTimer'); if (!el) return;
+  const s = Math.max(0, Math.floor((performance.now() - matchStart) / 1000));
+  el.textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
 function drawMinimap() {
   const cv = $('minimap'); if (!cv) return;
   if (!miniCtx) miniCtx = cv.getContext('2d');
@@ -2455,7 +2510,7 @@ function loop() {
     updateFx(dt);
     updateViewModel(dt, moving > 0);
     if (tabHeld) updateScoreboard();
-    if (now - lastMini > 90) { lastMini = now; drawMinimap(); }
+    if (now - lastMini > 90) { lastMini = now; drawMinimap(); updateMatchTimer(); }
     if (!me.dead && me.hp > 0 && me.hp < 30 && now - lastLowHp > 850) { lastLowHp = now; SND.lowhp(); }
 
     // clouds drift

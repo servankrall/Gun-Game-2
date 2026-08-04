@@ -325,6 +325,7 @@
   /* ---------- HUD extras: minimap, player count, streak, match banner ---------- */
   #minimap { position: absolute; top: 12px; left: 12px; width: 116px; height: 116px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); background: rgba(0,0,0,.35); }
   #playerCount { position: absolute; top: 132px; left: 40px; font-size: 11px; color: #9fe0a0; text-shadow: 1px 1px 0 #000; }
+  #matchTimer { position: absolute; top: 150px; left: 40px; font-size: 11px; color: #cfd6e6; text-shadow: 1px 1px 0 #000; font-variant-numeric: tabular-nums; }
   #announce {
     position: absolute; left: 50%; top: 22%; transform: translateX(-50%);
     font-size: 26px; color: #ffdd55; text-shadow: 3px 3px 0 #000; opacity: 0; pointer-events: none; white-space: nowrap;
@@ -466,6 +467,7 @@
     <div id="ggHud"></div>
     <canvas id="minimap" width="116" height="116"></canvas>
     <div id="playerCount">◉ 0</div>
+    <div id="matchTimer">00:00</div>
     <div id="announce"></div>
     <div id="matchOver">
       <div class="t" id="matchOverTitle">RED TEAM WINS</div>
