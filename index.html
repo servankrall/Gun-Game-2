@@ -64,6 +64,10 @@
   #agentchips .chip.locked { opacity: .55; }
   #agentchips .chip.locked:hover { opacity: .8; }
   #agentchips .chip .lk { color: #ffd24a; font-size: 8px; margin-left: 2px; }
+  #colorRow { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; padding: 2px 20px 4px; }
+  #colorRow .sw { width: 16px; height: 16px; border: 2px solid #000; cursor: pointer; box-sizing: border-box; }
+  #colorRow .sw.sel { border-color: #ffc23a; }
+  #colorRow .sw.def { background: repeating-linear-gradient(45deg, #556, #556 3px, #223 3px, #223 6px); }
   #coinBal { text-align: center; color: #ffd24a; font-size: 10px; letter-spacing: 1px; margin: 2px 0 6px; }
   .coin { display: inline-block; width: 11px; height: 11px; border-radius: 50%;
     background: radial-gradient(circle at 35% 30%, #ffe680, #f2b418 60%, #b9820c);
@@ -395,6 +399,7 @@
 
     <div id="coinBal"><span class="coin"></span>0</div>
     <div id="agentchips"></div>
+    <div id="colorRow"></div>
 
     <div id="bottombar">
       <div class="bside">

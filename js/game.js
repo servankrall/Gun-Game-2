@@ -194,6 +194,8 @@ function syncAccount() {
   syncTimer = setTimeout(() => authSend(JSON.parse(payload)), 400);
 }
 let myAgent = (AGENTS[localStorage.getItem('blockade_agent')] && isUnlocked(localStorage.getItem('blockade_agent'))) ? localStorage.getItem('blockade_agent') : 'soldier';
+let myColor = (() => { const v = parseInt(localStorage.getItem('bf_color')); return Number.isFinite(v) && v >= 0 ? v : null; })(); // custom accent, null = use class colour
+const COLOR_SWATCHES = [null, 0xff5555, 0xffa53a, 0xffe23a, 0x49c26a, 0x39e6ff, 0x7f9fff, 0x9b5cff, 0xff5cc8, 0xffffff];
 const hex6 = n => '#' + n.toString(16).padStart(6, '0');
 const agentArtSVG = (h) => `<svg viewBox="0 0 20 24" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
   <rect x="2" y="14" width="16" height="10" fill="#4b566d"/><rect x="2" y="14" width="16" height="2" fill="#5c6a86"/>
@@ -338,13 +340,32 @@ function setupMenu() {
   }
   function renderAgent() {
     const a = AGENTS[myAgent];
-    $('agentArt').innerHTML = agentArtSVG(hex6(a.accent));
+    const accent = (typeof myColor === 'number') ? myColor : a.accent; // custom colour preview
+    $('agentArt').innerHTML = agentArtSVG(hex6(accent));
     $('agentName').textContent = a.name;
     $('agentRole').textContent = a.role;
     const cf = document.querySelector('.cardframe');
-    if (cf) cf.style.borderColor = hex6(a.accent);
+    if (cf) cf.style.borderColor = hex6(accent);
     setCoinBal();
     refreshChips();
+  }
+  // custom accent colour swatches
+  const colorRow = $('colorRow');
+  if (colorRow) {
+    colorRow.innerHTML = '';
+    COLOR_SWATCHES.forEach(col => {
+      const sw = document.createElement('div');
+      sw.className = 'sw' + (col === null ? ' def' : '') + (col === myColor ? ' sel' : '');
+      if (col !== null) sw.style.background = hex6(col);
+      sw.addEventListener('click', () => {
+        myColor = col;
+        if (col === null) localStorage.removeItem('bf_color'); else localStorage.setItem('bf_color', String(col));
+        for (const s of colorRow.children) s.classList.remove('sel');
+        sw.classList.add('sel');
+        renderAgent();
+      });
+      colorRow.appendChild(sw);
+    });
   }
   // Clicking an owned class selects it; clicking a locked class buys it if you
   // have enough coins, otherwise tells you how many more you need.
@@ -708,7 +729,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId(), acct: account ? account.user : null }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId(), acct: account ? account.user : null, color: (typeof myColor === 'number' ? myColor : undefined) }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -1333,9 +1354,9 @@ function makeNameSprite(name, team) {
   return sp;
 }
 
-function makeCharacter(team, name, agentId) {
+function makeCharacter(team, name, agentId, color) {
   const group = new THREE.Group();
-  const accentCol = AGENTS[agentId]?.accent ?? 0x9aa4b2;
+  const accentCol = (typeof color === 'number' && color >= 0) ? color : (AGENTS[agentId]?.accent ?? 0x9aa4b2);
   const skin = new THREE.MeshLambertMaterial({ color: 0xd8a37a });
   const jersey = new THREE.MeshLambertMaterial({ color: team === 'red' ? 0xb03430 : 0x3a4fb4 });
   const pants = new THREE.MeshLambertMaterial({ color: 0x33343c });
@@ -1377,7 +1398,7 @@ function makeCharacter(team, name, agentId) {
 
 function addRemote(p) {
   if (remotes.has(p.id)) return;
-  const group = makeCharacter(p.team, p.name, p.agent);
+  const group = makeCharacter(p.team, p.name, p.agent, p.color);
   group.position.set(p.pos.x, p.pos.y, p.pos.z);
   group.rotation.y = p.ry + Math.PI;
   group.visible = p.alive;
