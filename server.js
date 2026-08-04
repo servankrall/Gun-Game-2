@@ -186,6 +186,12 @@ function makeFlags(r) {
 }
 const clampArena = v => Math.max(-HALF + 1.5, Math.min(HALF - 2.5, v));
 
+// Health packs at fixed open spots (same on every map). Walk over one at <100 HP
+// to heal; it respawns after a delay.
+const PICKUP_SPOTS = [[0, 16], [0, -16], [16, 0], [-16, 0]];
+const PICKUP_HEAL = 40, PICKUP_RESPAWN = 12000;
+function makePickups(r) { return PICKUP_SPOTS.map(([x, z]) => ({ x, y: groundTop(r, x, z) + 0.6, z, active: true, respawnAt: 0 })); }
+
 export class GameServer extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -320,6 +326,7 @@ export class GameServer extends DurableObject {
     if (!r) {
       const map = randomMap(); // maps are random, not player-chosen
       r = { id, clients: new Map(), bots: new Map(), scores: { red: 0, blue: 0 }, placed: new Map(), destroyed: new Map(), over: false, mode: 'dm', flags: null, map, ...buildRoomMap(map) };
+      r.pickups = makePickups(r);
       this.rooms.set(id, r);
     }
     return r;
@@ -422,6 +429,7 @@ export class GameServer extends DurableObject {
       t: 'welcome', id, team, pos, ry: player.ry, scores: r.scores, room: roomId, count: this.count(r),
       mode: r.mode, map: r.map, limit: r.mode === 'ctf' ? CFG.captureLimit : r.mode === 'gg' ? GG_LADDER.length : CFG.scoreLimit,
       flags: r.flags ? this.flagPub(r) : undefined,
+      pickups: r.pickups.map(p => ({ x: p.x, y: p.y, z: p.z, active: p.active })),
       players: this.entities(r).filter(e => e.id !== id).map(e => this.pub(e)),
       placed: [...r.placed.values()], destroyed: [...r.destroyed.values()],
     });
@@ -599,6 +607,26 @@ export class GameServer extends DurableObject {
     }
   }
 
+  // Health packs: heal a hurt player who walks over an active pack, then respawn it.
+  updatePickups(r, now) {
+    if (r.over || !r.pickups) return;
+    for (let i = 0; i < r.pickups.length; i++) {
+      const pk = r.pickups[i];
+      if (!pk.active) { if (now >= pk.respawnAt) { pk.active = true; this.broadcast(r, { t: 'pickup', i, active: true }); } continue; }
+      for (const c of r.clients.values()) {
+        const p = c.player;
+        if (!p.alive || p.hp >= 100) continue;
+        if ((p.pos.x - pk.x) ** 2 + (p.pos.z - pk.z) ** 2 < 1.6 && Math.abs(p.pos.y - pk.y) < 2.2) {
+          p.hp = Math.min(100, p.hp + PICKUP_HEAL); p.lastHit = now;
+          pk.active = false; pk.respawnAt = now + PICKUP_RESPAWN;
+          this.send(c.ws, { t: 'heal', hp: Math.round(p.hp) });
+          this.broadcast(r, { t: 'pickup', i, active: false });
+          break;
+        }
+      }
+    }
+  }
+
   endMatch(r, winner, winnerName) {
     r.over = true;
     this.awardWins(r, winner, winnerName); // +1 win on the leaderboard for logged-in winners
@@ -610,6 +638,7 @@ export class GameServer extends DurableObject {
     r.over = false;
     r.scores = { red: 0, blue: 0 };
     r.placed.clear(); r.destroyed.clear();
+    if (r.pickups) for (const pk of r.pickups) { pk.active = true; pk.respawnAt = 0; }
     if (r.mode === 'ctf') r.flags = makeFlags(r);
     for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.level = 0; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
     for (const b of r.bots.values()) { b.hp = 100; b.alive = true; b.kills = 0; b.deaths = 0; b.level = 0; b.pos = spawnFor(r, b.team); b.ry = ryFor(b.team); this.broadcast(r, { t: 'respawn', id: b.id, pos: b.pos }); }
@@ -756,6 +785,7 @@ export class GameServer extends DurableObject {
           if (!e.bot && nowHp !== was) { const c = r.clients.get(e.id); if (c) this.send(c.ws, { t: 'heal', hp: nowHp }); }
         }
         this.updateFlags(r, now);
+        this.updatePickups(r, now);
         const states = [];
         for (const e of this.entities(r)) { if (!e.alive) continue; states.push({ id: e.id, pos: e.pos, ry: e.ry, rx: e.rx, anim: e.anim, hp: Math.round(e.hp) }); }
         if (states.length) this.broadcast(r, { t: 'states', states, flags: r.mode === 'ctf' && r.flags ? this.flagPub(r) : undefined });

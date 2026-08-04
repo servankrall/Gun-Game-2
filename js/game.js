@@ -740,6 +740,7 @@ function handleMsg(m) {
       scoreLimit = m.limit || m.scoreLimit || 150;
       applyTheme(m.map || 'desert');
       buildWorld(m.map || 'desert'); // rebuild geometry for this room's (random) map
+      buildPickups(m.pickups);
       updateCount(m.count);
       for (const p of m.players) addRemote(p);
       // destroyed map blocks first, then player-built blocks (a built block may occupy a destroyed spot)
@@ -764,6 +765,7 @@ function handleMsg(m) {
       break;
     }
     case 'pong': dbgOnPong(m); break;
+    case 'pickup': { const pm = pickupMeshes[m.i]; if (pm) pm.mesh.visible = m.active !== false; if (m.active === false) SND.spawn(); break; }
     case 'flag': {
       const tn = m.team === 'red' ? 'Red' : 'Blue';
       if (m.ev === 'pickup') { feed(`${m.name || 'Someone'} grabbed the ${tn} flag!`, m.team); SND.spawn(); }
@@ -926,6 +928,7 @@ function handleMsg(m) {
       killStreak = 0; multiKill = 0; firstBloodDone = false;
       matchKills = 0; matchDeaths = 0; bestStreak = 0;
       matchStart = performance.now();
+      for (const pm of pickupMeshes) pm.mesh.visible = true; // packs come back next match
       hideMatchOver();
       resetWorld();
       if (gameMode === 'gg') { myLevel = 0; applyGunGameWeapon(); }
@@ -1157,6 +1160,36 @@ function buildWorld(mapId = 'desert') {
     mesh.receiveShadow = true;
     scene.add(mesh);
     worldMeshes.push(mesh);
+  }
+}
+
+// ---- health packs (pickups) ----
+let pickupMeshes = [];
+function makeHealthPack() {
+  const c = document.createElement('canvas'); c.width = c.height = 16; const g = c.getContext('2d');
+  g.fillStyle = '#eee'; g.fillRect(0, 0, 16, 16);
+  g.fillStyle = '#222'; g.fillRect(0, 0, 16, 1); g.fillRect(0, 15, 16, 1); g.fillRect(0, 0, 1, 16); g.fillRect(15, 0, 1, 16);
+  g.fillStyle = '#d21e1e'; g.fillRect(6, 3, 4, 10); g.fillRect(3, 6, 10, 4);
+  const tex = new THREE.CanvasTexture(c); tex.magFilter = tex.minFilter = THREE.NearestFilter;
+  return new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshBasicMaterial({ map: tex }));
+}
+function buildPickups(list) {
+  for (const pm of pickupMeshes) scene.remove(pm.mesh);
+  pickupMeshes = [];
+  for (const pk of list || []) {
+    const mesh = makeHealthPack();
+    mesh.position.set(pk.x, pk.y + 0.1, pk.z);
+    mesh.visible = pk.active !== false;
+    scene.add(mesh);
+    pickupMeshes.push({ mesh, base: pk.y + 0.1 });
+  }
+}
+function updatePickups(dt) {
+  const t = performance.now() / 300;
+  for (const pm of pickupMeshes) {
+    if (!pm.mesh.visible) continue;
+    pm.mesh.rotation.y += dt * 2;
+    pm.mesh.position.y = pm.base + Math.sin(t) * 0.12;
   }
 }
 
@@ -2528,6 +2561,7 @@ function loop() {
     updateRemotes(dt);
     updateRockets(dt);
     updateGrenades(dt);
+    updatePickups(dt);
     updateFx(dt);
     updateViewModel(dt, moving > 0);
     if (tabHeld) updateScoreboard();
