@@ -98,6 +98,10 @@
   #optPanel .optrow { display: flex; align-items: center; gap: 10px; color: #cfd6e6; font-size: 9px; }
   #optPanel .optrow input[type=range] { width: 240px; }
   #optPanel .opthint { color: #8090ad; font-size: 8px; line-height: 1.9; text-align: center; }
+  #pauseSettings { display: flex; flex-direction: column; gap: 8px; margin: 12px auto; max-width: 340px; }
+  #pauseSettings .optrow { display: flex; align-items: center; gap: 10px; color: #cfd6e6; font-size: 9px; justify-content: space-between; }
+  #pauseSettings .optrow input[type=range] { width: 180px; }
+  #pauseSettings select { background: #0c1730; color: #fff; border: 2px solid #2a3a5c; padding: 6px; font-family: inherit; font-size: 9px; outline: none; }
   #authPanel { display: none; flex-direction: column; gap: 8px; width: min(420px, 92vw); margin: 8px auto 0;
     background: rgba(6,14,30,.72); border: 2px solid #2a3a5c; padding: 12px; }
   #authPanel.open { display: flex; }
@@ -517,7 +521,14 @@
     <div id="scoreboard"></div>
     <div id="pauseHint">
       <div class="t">PAUSED</div>
-      <div class="c">LMB — fire · RMB — aim (sniper)<br>R — reload · 1 rifle · 2 shotgun · 3 sniper<br>4 blocks · 5 pickaxe · 6 bazooka<br>TAB — scoreboard · T — chat · V (hold) — voice</div>
+      <div class="c">LMB — fire · RMB — aim · R — reload · 1-9 weapons · G grenade<br>TAB — scoreboard · T — chat (/w name msg) · V (hold) — voice</div>
+      <div id="pauseSettings">
+        <div class="optrow"><span>LOOK SENS</span><input id="psensRange" type="range" min="0.4" max="2" step="0.05"><span id="psensVal">1.00x</span></div>
+        <div class="optrow"><span>FOV</span><input id="pfovRange" type="range" min="60" max="100" step="1"><span id="pfovVal">70</span></div>
+        <div class="optrow"><span>VOLUME</span><input id="pvolRange" type="range" min="0" max="1" step="0.05"><span id="pvolVal">80%</span></div>
+        <div class="optrow"><span>GRAPHICS</span><select id="pgfxSel"><option value="high">HIGH</option><option value="low">LOW (faster)</option></select></div>
+        <div class="optrow"><span>CROSSHAIR</span><select id="pxhSel"><option value="white">WHITE</option><option value="green">GREEN</option><option value="cyan">CYAN</option><option value="red">RED</option><option value="yellow">YELLOW</option><option value="pink">PINK</option></select></div>
+      </div>
       <button class="mc-btn" id="resumeBtn">BACK TO GAME</button>
       <button class="mc-btn" id="menuBtnPause">MAIN MENU</button>
     </div>
@@ -1870,6 +1881,26 @@ function applyCrosshair() {
   else { root.removeProperty('--xh'); root.removeProperty('--xh-blend'); }
 }
 applyCrosshair();
+// Settings inputs exist in both the menu and the pause screen (prefix '' and 'p');
+// keep them wired to the same state and in sync.
+function refreshSettingInputs() {
+  const S = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+  const T = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  for (const p of ['', 'p']) {
+    S(p + 'sensRange', lookMul); T(p + 'sensVal', lookMul.toFixed(2) + 'x');
+    S(p + 'fovRange', fov); T(p + 'fovVal', fov);
+    S(p + 'volRange', sndVol); T(p + 'volVal', Math.round(sndVol * 100) + '%');
+    S(p + 'gfxSel', gfxQuality); S(p + 'xhSel', xhColor);
+  }
+}
+function wireSettingsPanel(p) {
+  const $$ = id => document.getElementById(p + id);
+  const sr = $$('sensRange'); if (sr) sr.addEventListener('input', () => { lookMul = parseFloat(sr.value) || 1; localStorage.setItem('bf_sens', String(lookMul)); refreshSettingInputs(); });
+  const fr = $$('fovRange'); if (fr) fr.addEventListener('input', () => { fov = parseInt(fr.value) || 70; localStorage.setItem('bf_fov', String(fov)); applyFov(); refreshSettingInputs(); });
+  const vr = $$('volRange'); if (vr) vr.addEventListener('input', () => { sndVol = parseFloat(vr.value); localStorage.setItem('bf_vol', String(sndVol)); applyVol(); refreshSettingInputs(); });
+  const gs = $$('gfxSel'); if (gs) gs.addEventListener('change', () => { gfxQuality = gs.value === 'low' ? 'low' : 'high'; localStorage.setItem('bf_gfx', gfxQuality); applyGfx(); refreshSettingInputs(); });
+  const xs = $$('xhSel'); if (xs) xs.addEventListener('change', () => { xhColor = xs.value; localStorage.setItem('bf_xh', xhColor); applyCrosshair(); refreshSettingInputs(); });
+}
 
 const tracers = [], particles = [], flashes = [], rockets = [], grenades = [], dmgTexts = [];
 function spawnDamageNumber(pos, dmg, head) {
@@ -2069,34 +2100,10 @@ function setupMenu() {
   const optBtn = $('optBtn');
   if (optBtn) optBtn.addEventListener('click', () => $('optPanel').classList.toggle('open'));
 
-  // graphics quality (applies live)
-  const gfxSel = $('gfxSel');
-  if (gfxSel) {
-    gfxSel.value = gfxQuality;
-    gfxSel.addEventListener('change', () => {
-      gfxQuality = gfxSel.value === 'low' ? 'low' : 'high';
-      localStorage.setItem('bf_gfx', gfxQuality);
-      applyGfx();
-    });
-  }
-  // field of view (applies live)
-  const fovR = $('fovRange'), fovV = $('fovVal');
-  if (fovR) {
-    fovR.value = fov; if (fovV) fovV.textContent = fov;
-    fovR.addEventListener('input', () => { fov = parseInt(fovR.value) || 70; localStorage.setItem('bf_fov', String(fov)); if (fovV) fovV.textContent = fov; applyFov(); });
-  }
-  // master volume (applies live)
-  const volR = $('volRange'), volV = $('volVal');
-  if (volR) {
-    volR.value = sndVol; if (volV) volV.textContent = Math.round(sndVol * 100) + '%';
-    volR.addEventListener('input', () => { sndVol = parseFloat(volR.value); localStorage.setItem('bf_vol', String(sndVol)); if (volV) volV.textContent = Math.round(sndVol * 100) + '%'; applyVol(); });
-  }
-  // crosshair color (applies live)
-  const xhSel = $('xhSel');
-  if (xhSel) {
-    xhSel.value = xhColor;
-    xhSel.addEventListener('change', () => { xhColor = xhSel.value; localStorage.setItem('bf_xh', xhColor); applyCrosshair(); });
-  }
+  // graphics / FOV / volume / crosshair — wired for both the menu and pause panels
+  wireSettingsPanel('');
+  wireSettingsPanel('p');
+  refreshSettingInputs();
   const start = () => {
     const name = input.value.trim();
     if (name.length < 2) { err.textContent = 'Nickname must be at least 2 characters!'; return; }
@@ -2108,16 +2115,6 @@ function setupMenu() {
   btn.addEventListener('click', start);
   input.addEventListener('keydown', e => { if (e.key === 'Enter') start(); });
 
-  // sensitivity slider (persisted)
-  const sr = $('sensRange'), lbl = $('sensVal');
-  if (sr) {
-    sr.value = lookMul; if (lbl) lbl.textContent = lookMul.toFixed(2) + 'x';
-    sr.addEventListener('input', () => {
-      lookMul = parseFloat(sr.value) || 1;
-      localStorage.setItem('bf_sens', String(lookMul));
-      if (lbl) lbl.textContent = lookMul.toFixed(2) + 'x';
-    });
-  }
 
   // private room invite: generate a room code if none, copy the link
   const inv = $('inviteBtn');
@@ -4003,6 +4000,7 @@ function setupInput() {
     locked = document.pointerLockElement === canvas;
     if (inGame) {
       $('pauseHint').style.display = locked ? 'none' : 'flex';
+      if (!locked) refreshSettingInputs();
       $('teamBanner').style.display = 'none';
     }
     if (!locked) { mouseDown = false; Object.keys(keys).forEach(k => keys[k] = false); }

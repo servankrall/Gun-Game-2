@@ -222,6 +222,26 @@ function applyCrosshair() {
   else { root.removeProperty('--xh'); root.removeProperty('--xh-blend'); }
 }
 applyCrosshair();
+// Settings inputs exist in both the menu and the pause screen (prefix '' and 'p');
+// keep them wired to the same state and in sync.
+function refreshSettingInputs() {
+  const S = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+  const T = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  for (const p of ['', 'p']) {
+    S(p + 'sensRange', lookMul); T(p + 'sensVal', lookMul.toFixed(2) + 'x');
+    S(p + 'fovRange', fov); T(p + 'fovVal', fov);
+    S(p + 'volRange', sndVol); T(p + 'volVal', Math.round(sndVol * 100) + '%');
+    S(p + 'gfxSel', gfxQuality); S(p + 'xhSel', xhColor);
+  }
+}
+function wireSettingsPanel(p) {
+  const $$ = id => document.getElementById(p + id);
+  const sr = $$('sensRange'); if (sr) sr.addEventListener('input', () => { lookMul = parseFloat(sr.value) || 1; localStorage.setItem('bf_sens', String(lookMul)); refreshSettingInputs(); });
+  const fr = $$('fovRange'); if (fr) fr.addEventListener('input', () => { fov = parseInt(fr.value) || 70; localStorage.setItem('bf_fov', String(fov)); applyFov(); refreshSettingInputs(); });
+  const vr = $$('volRange'); if (vr) vr.addEventListener('input', () => { sndVol = parseFloat(vr.value); localStorage.setItem('bf_vol', String(sndVol)); applyVol(); refreshSettingInputs(); });
+  const gs = $$('gfxSel'); if (gs) gs.addEventListener('change', () => { gfxQuality = gs.value === 'low' ? 'low' : 'high'; localStorage.setItem('bf_gfx', gfxQuality); applyGfx(); refreshSettingInputs(); });
+  const xs = $$('xhSel'); if (xs) xs.addEventListener('change', () => { xhColor = xs.value; localStorage.setItem('bf_xh', xhColor); applyCrosshair(); refreshSettingInputs(); });
+}
 
 const tracers = [], particles = [], flashes = [], rockets = [], grenades = [], dmgTexts = [];
 function spawnDamageNumber(pos, dmg, head) {
@@ -421,34 +441,10 @@ function setupMenu() {
   const optBtn = $('optBtn');
   if (optBtn) optBtn.addEventListener('click', () => $('optPanel').classList.toggle('open'));
 
-  // graphics quality (applies live)
-  const gfxSel = $('gfxSel');
-  if (gfxSel) {
-    gfxSel.value = gfxQuality;
-    gfxSel.addEventListener('change', () => {
-      gfxQuality = gfxSel.value === 'low' ? 'low' : 'high';
-      localStorage.setItem('bf_gfx', gfxQuality);
-      applyGfx();
-    });
-  }
-  // field of view (applies live)
-  const fovR = $('fovRange'), fovV = $('fovVal');
-  if (fovR) {
-    fovR.value = fov; if (fovV) fovV.textContent = fov;
-    fovR.addEventListener('input', () => { fov = parseInt(fovR.value) || 70; localStorage.setItem('bf_fov', String(fov)); if (fovV) fovV.textContent = fov; applyFov(); });
-  }
-  // master volume (applies live)
-  const volR = $('volRange'), volV = $('volVal');
-  if (volR) {
-    volR.value = sndVol; if (volV) volV.textContent = Math.round(sndVol * 100) + '%';
-    volR.addEventListener('input', () => { sndVol = parseFloat(volR.value); localStorage.setItem('bf_vol', String(sndVol)); if (volV) volV.textContent = Math.round(sndVol * 100) + '%'; applyVol(); });
-  }
-  // crosshair color (applies live)
-  const xhSel = $('xhSel');
-  if (xhSel) {
-    xhSel.value = xhColor;
-    xhSel.addEventListener('change', () => { xhColor = xhSel.value; localStorage.setItem('bf_xh', xhColor); applyCrosshair(); });
-  }
+  // graphics / FOV / volume / crosshair — wired for both the menu and pause panels
+  wireSettingsPanel('');
+  wireSettingsPanel('p');
+  refreshSettingInputs();
   const start = () => {
     const name = input.value.trim();
     if (name.length < 2) { err.textContent = 'Nickname must be at least 2 characters!'; return; }
@@ -460,16 +456,6 @@ function setupMenu() {
   btn.addEventListener('click', start);
   input.addEventListener('keydown', e => { if (e.key === 'Enter') start(); });
 
-  // sensitivity slider (persisted)
-  const sr = $('sensRange'), lbl = $('sensVal');
-  if (sr) {
-    sr.value = lookMul; if (lbl) lbl.textContent = lookMul.toFixed(2) + 'x';
-    sr.addEventListener('input', () => {
-      lookMul = parseFloat(sr.value) || 1;
-      localStorage.setItem('bf_sens', String(lookMul));
-      if (lbl) lbl.textContent = lookMul.toFixed(2) + 'x';
-    });
-  }
 
   // private room invite: generate a room code if none, copy the link
   const inv = $('inviteBtn');
@@ -2355,6 +2341,7 @@ function setupInput() {
     locked = document.pointerLockElement === canvas;
     if (inGame) {
       $('pauseHint').style.display = locked ? 'none' : 'flex';
+      if (!locked) refreshSettingInputs();
       $('teamBanner').style.display = 'none';
     }
     if (!locked) { mouseDown = false; Object.keys(keys).forEach(k => keys[k] = false); }

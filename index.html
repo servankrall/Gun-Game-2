@@ -98,6 +98,10 @@
   #optPanel .optrow { display: flex; align-items: center; gap: 10px; color: #cfd6e6; font-size: 9px; }
   #optPanel .optrow input[type=range] { width: 240px; }
   #optPanel .opthint { color: #8090ad; font-size: 8px; line-height: 1.9; text-align: center; }
+  #pauseSettings { display: flex; flex-direction: column; gap: 8px; margin: 12px auto; max-width: 340px; }
+  #pauseSettings .optrow { display: flex; align-items: center; gap: 10px; color: #cfd6e6; font-size: 9px; justify-content: space-between; }
+  #pauseSettings .optrow input[type=range] { width: 180px; }
+  #pauseSettings select { background: #0c1730; color: #fff; border: 2px solid #2a3a5c; padding: 6px; font-family: inherit; font-size: 9px; outline: none; }
   #authPanel { display: none; flex-direction: column; gap: 8px; width: min(420px, 92vw); margin: 8px auto 0;
     background: rgba(6,14,30,.72); border: 2px solid #2a3a5c; padding: 12px; }
   #authPanel.open { display: flex; }
@@ -517,7 +521,14 @@
     <div id="scoreboard"></div>
     <div id="pauseHint">
       <div class="t">PAUSED</div>
-      <div class="c">LMB — fire · RMB — aim (sniper)<br>R — reload · 1 rifle · 2 shotgun · 3 sniper<br>4 blocks · 5 pickaxe · 6 bazooka<br>TAB — scoreboard · T — chat · V (hold) — voice</div>
+      <div class="c">LMB — fire · RMB — aim · R — reload · 1-9 weapons · G grenade<br>TAB — scoreboard · T — chat (/w name msg) · V (hold) — voice</div>
+      <div id="pauseSettings">
+        <div class="optrow"><span>LOOK SENS</span><input id="psensRange" type="range" min="0.4" max="2" step="0.05"><span id="psensVal">1.00x</span></div>
+        <div class="optrow"><span>FOV</span><input id="pfovRange" type="range" min="60" max="100" step="1"><span id="pfovVal">70</span></div>
+        <div class="optrow"><span>VOLUME</span><input id="pvolRange" type="range" min="0" max="1" step="0.05"><span id="pvolVal">80%</span></div>
+        <div class="optrow"><span>GRAPHICS</span><select id="pgfxSel"><option value="high">HIGH</option><option value="low">LOW (faster)</option></select></div>
+        <div class="optrow"><span>CROSSHAIR</span><select id="pxhSel"><option value="white">WHITE</option><option value="green">GREEN</option><option value="cyan">CYAN</option><option value="red">RED</option><option value="yellow">YELLOW</option><option value="pink">PINK</option></select></div>
+      </div>
       <button class="mc-btn" id="resumeBtn">BACK TO GAME</button>
       <button class="mc-btn" id="menuBtnPause">MAIN MENU</button>
     </div>
