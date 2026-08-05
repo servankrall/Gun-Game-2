@@ -355,6 +355,8 @@
   #minimap { position: absolute; top: 12px; left: 12px; width: 116px; height: 116px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); background: rgba(0,0,0,.35); }
   #playerCount { position: absolute; top: 132px; left: 40px; font-size: 11px; color: #9fe0a0; text-shadow: 1px 1px 0 #000; }
   #matchTimer { position: absolute; top: 150px; left: 40px; font-size: 11px; color: #cfd6e6; text-shadow: 1px 1px 0 #000; font-variant-numeric: tabular-nums; }
+  #streakHud { position: absolute; top: 170px; left: 40px; font-size: 11px; color: #ffb14a; text-shadow: 1px 1px 0 #000; display: none; }
+  #shieldHud { position: absolute; top: 188px; left: 40px; font-size: 11px; color: #5ad1ff; text-shadow: 1px 1px 0 #000; display: none; padding: 1px 5px; border: 1px solid #5ad1ff88; border-radius: 3px; background: rgba(20,60,90,0.35); }
   #announce {
     position: absolute; left: 50%; top: 22%; transform: translateX(-50%);
     font-size: 26px; color: #ffdd55; text-shadow: 3px 3px 0 #000; opacity: 0; pointer-events: none; white-space: nowrap;
@@ -506,6 +508,8 @@
     <canvas id="minimap" width="116" height="116"></canvas>
     <div id="playerCount">◉ 0</div>
     <div id="matchTimer">00:00</div>
+    <div id="streakHud"></div>
+    <div id="shieldHud"></div>
     <div id="announce"></div>
     <div id="matchOver">
       <div class="t" id="matchOverTitle">RED TEAM WINS</div>
@@ -1105,6 +1109,7 @@ class GameServer {
   applyDamage(r, tgt, dmg, attacker, head, weapon) {
     if (r.over) return;
     dmg = Math.max(1, Math.round(dmg * (tgt.dmgTakenMult || 1))); // agent damage-taken perk
+    if (tgt.shieldUntil && tgt.shieldUntil > Date.now()) dmg = Math.max(1, Math.round(dmg * 0.55)); // overshield reward absorbs 45%
     tgt.hp -= dmg;
     tgt.lastHit = Date.now(); // resets the regen delay
     if (tgt.hp > 0) {
@@ -1112,14 +1117,20 @@ class GameServer {
       return;
     }
     tgt.hp = 0; tgt.alive = false; tgt.deaths++;
-    tgt.streak = 0; // dying breaks your streak
+    tgt.streak = 0; tgt.shieldUntil = 0; // dying breaks your streak and shield
     if (attacker) {
       attacker.kills++;
       attacker.streak = (attacker.streak || 0) + 1;
-      // Kill-streak reward: every 3rd kill without dying refills you to full health.
-      if (attacker.streak % 3 === 0 && attacker.alive) {
+      const s = attacker.streak;
+      // Kill-streak rewards for climbing without dying: heal to full every 3rd kill,
+      // and a 10s overshield (45% damage absorption) every 5th kill.
+      if (s % 3 === 0 && attacker.alive) {
         attacker.hp = 100; attacker.lastHit = 0;
-        if (!attacker.bot) { const c = r.clients.get(attacker.id); if (c) this.send(c.ws, { t: 'heal', hp: 100, streak: attacker.streak }); }
+        if (!attacker.bot) { const c = r.clients.get(attacker.id); if (c) this.send(c.ws, { t: 'heal', hp: 100, streak: s }); }
+      }
+      if (s % 5 === 0 && attacker.alive) {
+        attacker.shieldUntil = Date.now() + 10000;
+        if (!attacker.bot) { const c = r.clients.get(attacker.id); if (c) this.send(c.ws, { t: 'buff', kind: 'overshield', ms: 10000, streak: s }); }
       }
     }
     tgt.respawnAt = Date.now() + (tgt.bot ? 3000 : 3500); // auto-respawn (client never asks)
@@ -1243,8 +1254,8 @@ class GameServer {
     r.placed.clear(); r.destroyed.clear();
     if (r.pickups) for (const pk of r.pickups) { pk.active = true; pk.respawnAt = 0; }
     if (r.mode === 'ctf') r.flags = makeFlags(r);
-    for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.level = 0; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
-    for (const b of r.bots.values()) { b.hp = 100; b.alive = true; b.kills = 0; b.deaths = 0; b.level = 0; b.pos = spawnFor(r, b.team); b.ry = ryFor(b.team); this.broadcast(r, { t: 'respawn', id: b.id, pos: b.pos }); }
+    for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.level = 0; p.streak = 0; p.shieldUntil = 0; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
+    for (const b of r.bots.values()) { b.hp = 100; b.alive = true; b.kills = 0; b.deaths = 0; b.level = 0; b.streak = 0; b.shieldUntil = 0; b.pos = spawnFor(r, b.team); b.ry = ryFor(b.team); this.broadcast(r, { t: 'respawn', id: b.id, pos: b.pos }); }
     this.broadcast(r, { t: 'scores', scores: r.scores });
     this.broadcast(r, { t: 'matchstart', scores: r.scores });
   }
@@ -1736,7 +1747,10 @@ const me = {
   lastShot: 0, lastNade: 0,
   zoomed: false,
   jumps: 0,
+  shieldUntil: 0, // overshield killstreak reward expiry (performance.now ms)
 };
+let lastKilledBy = null;        // id of whoever last killed me (for REVENGE!)
+const nemesisDeaths = {};       // id -> times they've killed me this match
 let jumpPrev = false; // edge-detect the jump key so double-jump fires once per press
 const MAX_NADES = 3;
 
@@ -1832,6 +1846,8 @@ const ACHIEVEMENTS = {
   ggwin:     { name: 'GUN GOD', reward: 80 },
   unlockall: { name: 'COLLECTOR', reward: 150 },
   rich:      { name: 'TYCOON', reward: 0 },
+  overshield:{ name: 'JUGGERNAUT', reward: 50 },
+  revenge:   { name: 'PAYBACK', reward: 30 },
 };
 let achievements = (() => { try { const a = JSON.parse(localStorage.getItem('bf_ach')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
 function unlockAch(id) {
@@ -2446,7 +2462,7 @@ function handleMsg(m) {
       if (gameMode === 'gg') { myLevel = 0; }
       startGame();
       matchStart = performance.now();
-      matchKills = 0; matchDeaths = 0; bestStreak = 0;
+      matchKills = 0; matchDeaths = 0; bestStreak = 0; lastKilledBy = null; for (const k in nemesisDeaths) delete nemesisDeaths[k]; me.shieldUntil = 0;
       setGunGameUI(gameMode === 'gg');
       if (gameMode === 'gg') applyGunGameWeapon();
       feed('MAP: ' + (THEMES[mapTheme]?.name || mapTheme), myTeam);
@@ -2522,6 +2538,15 @@ function handleMsg(m) {
       if (m.streak) { announce(`${m.streak} KILL STREAK — HEALED!`); SND.spawn(); }
       break;
     }
+    case 'buff': {
+      if (m.kind === 'overshield' && !me.dead) {
+        me.shieldUntil = performance.now() + (m.ms || 10000);
+        announce(`OVERSHIELD!  ${m.streak || ''} STREAK`, '#5ad1ff');
+        SND.spawn();
+        unlockAch('overshield');
+      }
+      break;
+    }
     case 'hitconfirm': {
       const hm = $('hitmarker');
       hm.classList.toggle('head', m.head);
@@ -2554,12 +2579,23 @@ function handleMsg(m) {
       if (killer) killer.kills++;
       if (m.victim === myId) {
         me.hp = 0; me.dead = true; me.deaths++; matchDeaths++;
-        killStreak = 0; multiKill = 0;
+        killStreak = 0; multiKill = 0; me.shieldUntil = 0;
         updateHearts();
         SND.death();
         showDeathScreen(kName);
+        // Track who's picking on you — 3 kills makes them your nemesis.
+        if (m.killer !== myId) {
+          lastKilledBy = m.killer;
+          nemesisDeaths[m.killer] = (nemesisDeaths[m.killer] || 0) + 1;
+          if (nemesisDeaths[m.killer] === 3) feed(`NEMESIS: ${kName} has killed you 3 times!`, vTeam);
+        }
       }
-      if (m.killer === myId && m.victim !== myId) { me.kills++; matchKills++; SND.kill(); onMyKill(); }
+      if (m.killer === myId && m.victim !== myId) {
+        me.kills++; matchKills++; SND.kill(); onMyKill();
+        if (lastKilledBy && m.victim === lastKilledBy) { // paid them back
+          announce('REVENGE!', '#ffd24a'); awardCoins(15); unlockAch('revenge'); lastKilledBy = null;
+        }
+      }
       break;
     }
     case 'level': {
@@ -2582,7 +2618,7 @@ function handleMsg(m) {
       if (m.id === myId) {
         me.pos.set(m.pos.x, m.pos.y, m.pos.z);
         me.vel.set(0, 0, 0);
-        me.hp = 100; me.dead = false;
+        me.hp = 100; me.dead = false; me.shieldUntil = 0;
         me.ammo = { rifle: 30, smg: 28, shotgun: 6, sniper: 5, lmg: 60, pistol: 12, bazooka: 1 };
         me.blocks = AGENTS[myAgent]?.blocks || 64; me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.reloading = false;
         me.ry = myTeam === 'red' ? -Math.PI / 2 : Math.PI / 2; me.rx = 0;
@@ -2636,7 +2672,7 @@ function handleMsg(m) {
       $('scoreRed').textContent = scores.red;
       $('scoreBlue').textContent = scores.blue;
       killStreak = 0; multiKill = 0; firstBloodDone = false;
-      matchKills = 0; matchDeaths = 0; bestStreak = 0;
+      matchKills = 0; matchDeaths = 0; bestStreak = 0; lastKilledBy = null; for (const k in nemesisDeaths) delete nemesisDeaths[k]; me.shieldUntil = 0;
       matchStart = performance.now();
       for (const pm of pickupMeshes) pm.mesh.visible = true; // packs come back next match
       hideMatchOver();
@@ -4237,6 +4273,20 @@ function updateMatchTimer() {
   const s = Math.max(0, Math.floor((performance.now() - matchStart) / 1000));
   el.textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
 }
+// Live streak + overshield badges under the minimap.
+function updateBuffHud(now) {
+  const sh = $('streakHud');
+  if (sh) {
+    if (killStreak >= 2 && !me.dead) { sh.style.display = 'block'; sh.textContent = 'STREAK ×' + killStreak; }
+    else sh.style.display = 'none';
+  }
+  const bh = $('shieldHud');
+  if (bh) {
+    const rem = me.shieldUntil - now;
+    if (rem > 0 && !me.dead) { bh.style.display = 'block'; bh.textContent = 'SHIELD ' + Math.ceil(rem / 1000) + 's'; }
+    else bh.style.display = 'none';
+  }
+}
 function drawMinimap() {
   const cv = $('minimap'); if (!cv) return;
   if (!miniCtx) miniCtx = cv.getContext('2d');
@@ -4317,7 +4367,7 @@ function loop() {
     updateFx(dt);
     updateViewModel(dt, moving > 0);
     if (tabHeld) updateScoreboard();
-    if (now - lastMini > 90) { lastMini = now; drawMinimap(); updateMatchTimer(); }
+    if (now - lastMini > 90) { lastMini = now; drawMinimap(); updateMatchTimer(); updateBuffHud(now); }
     if (!me.dead && me.hp > 0 && me.hp < 30 && now - lastLowHp > 850) { lastLowHp = now; SND.lowhp(); }
 
     // clouds drift

@@ -532,6 +532,7 @@ export class GameServer extends DurableObject {
   applyDamage(r, tgt, dmg, attacker, head, weapon) {
     if (r.over) return;
     dmg = Math.max(1, Math.round(dmg * (tgt.dmgTakenMult || 1))); // agent damage-taken perk
+    if (tgt.shieldUntil && tgt.shieldUntil > Date.now()) dmg = Math.max(1, Math.round(dmg * 0.55)); // overshield reward absorbs 45%
     tgt.hp -= dmg;
     tgt.lastHit = Date.now(); // resets the regen delay
     if (tgt.hp > 0) {
@@ -539,14 +540,20 @@ export class GameServer extends DurableObject {
       return;
     }
     tgt.hp = 0; tgt.alive = false; tgt.deaths++;
-    tgt.streak = 0; // dying breaks your streak
+    tgt.streak = 0; tgt.shieldUntil = 0; // dying breaks your streak and shield
     if (attacker) {
       attacker.kills++;
       attacker.streak = (attacker.streak || 0) + 1;
-      // Kill-streak reward: every 3rd kill without dying refills you to full health.
-      if (attacker.streak % 3 === 0 && attacker.alive) {
+      const s = attacker.streak;
+      // Kill-streak rewards for climbing without dying: heal to full every 3rd kill,
+      // and a 10s overshield (45% damage absorption) every 5th kill.
+      if (s % 3 === 0 && attacker.alive) {
         attacker.hp = 100; attacker.lastHit = 0;
-        if (!attacker.bot) { const c = r.clients.get(attacker.id); if (c) this.send(c.ws, { t: 'heal', hp: 100, streak: attacker.streak }); }
+        if (!attacker.bot) { const c = r.clients.get(attacker.id); if (c) this.send(c.ws, { t: 'heal', hp: 100, streak: s }); }
+      }
+      if (s % 5 === 0 && attacker.alive) {
+        attacker.shieldUntil = Date.now() + 10000;
+        if (!attacker.bot) { const c = r.clients.get(attacker.id); if (c) this.send(c.ws, { t: 'buff', kind: 'overshield', ms: 10000, streak: s }); }
       }
     }
     tgt.respawnAt = Date.now() + (tgt.bot ? 3000 : 3500); // auto-respawn (client never asks)
@@ -670,8 +677,8 @@ export class GameServer extends DurableObject {
     r.placed.clear(); r.destroyed.clear();
     if (r.pickups) for (const pk of r.pickups) { pk.active = true; pk.respawnAt = 0; }
     if (r.mode === 'ctf') r.flags = makeFlags(r);
-    for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.level = 0; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
-    for (const b of r.bots.values()) { b.hp = 100; b.alive = true; b.kills = 0; b.deaths = 0; b.level = 0; b.pos = spawnFor(r, b.team); b.ry = ryFor(b.team); this.broadcast(r, { t: 'respawn', id: b.id, pos: b.pos }); }
+    for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.level = 0; p.streak = 0; p.shieldUntil = 0; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
+    for (const b of r.bots.values()) { b.hp = 100; b.alive = true; b.kills = 0; b.deaths = 0; b.level = 0; b.streak = 0; b.shieldUntil = 0; b.pos = spawnFor(r, b.team); b.ry = ryFor(b.team); this.broadcast(r, { t: 'respawn', id: b.id, pos: b.pos }); }
     this.broadcast(r, { t: 'scores', scores: r.scores });
     this.broadcast(r, { t: 'matchstart', scores: r.scores });
   }

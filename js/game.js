@@ -55,7 +55,10 @@ const me = {
   lastShot: 0, lastNade: 0,
   zoomed: false,
   jumps: 0,
+  shieldUntil: 0, // overshield killstreak reward expiry (performance.now ms)
 };
+let lastKilledBy = null;        // id of whoever last killed me (for REVENGE!)
+const nemesisDeaths = {};       // id -> times they've killed me this match
 let jumpPrev = false; // edge-detect the jump key so double-jump fires once per press
 const MAX_NADES = 3;
 
@@ -151,6 +154,8 @@ const ACHIEVEMENTS = {
   ggwin:     { name: 'GUN GOD', reward: 80 },
   unlockall: { name: 'COLLECTOR', reward: 150 },
   rich:      { name: 'TYCOON', reward: 0 },
+  overshield:{ name: 'JUGGERNAUT', reward: 50 },
+  revenge:   { name: 'PAYBACK', reward: 30 },
 };
 let achievements = (() => { try { const a = JSON.parse(localStorage.getItem('bf_ach')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
 function unlockAch(id) {
@@ -765,7 +770,7 @@ function handleMsg(m) {
       if (gameMode === 'gg') { myLevel = 0; }
       startGame();
       matchStart = performance.now();
-      matchKills = 0; matchDeaths = 0; bestStreak = 0;
+      matchKills = 0; matchDeaths = 0; bestStreak = 0; lastKilledBy = null; for (const k in nemesisDeaths) delete nemesisDeaths[k]; me.shieldUntil = 0;
       setGunGameUI(gameMode === 'gg');
       if (gameMode === 'gg') applyGunGameWeapon();
       feed('MAP: ' + (THEMES[mapTheme]?.name || mapTheme), myTeam);
@@ -841,6 +846,15 @@ function handleMsg(m) {
       if (m.streak) { announce(`${m.streak} KILL STREAK — HEALED!`); SND.spawn(); }
       break;
     }
+    case 'buff': {
+      if (m.kind === 'overshield' && !me.dead) {
+        me.shieldUntil = performance.now() + (m.ms || 10000);
+        announce(`OVERSHIELD!  ${m.streak || ''} STREAK`, '#5ad1ff');
+        SND.spawn();
+        unlockAch('overshield');
+      }
+      break;
+    }
     case 'hitconfirm': {
       const hm = $('hitmarker');
       hm.classList.toggle('head', m.head);
@@ -873,12 +887,23 @@ function handleMsg(m) {
       if (killer) killer.kills++;
       if (m.victim === myId) {
         me.hp = 0; me.dead = true; me.deaths++; matchDeaths++;
-        killStreak = 0; multiKill = 0;
+        killStreak = 0; multiKill = 0; me.shieldUntil = 0;
         updateHearts();
         SND.death();
         showDeathScreen(kName);
+        // Track who's picking on you — 3 kills makes them your nemesis.
+        if (m.killer !== myId) {
+          lastKilledBy = m.killer;
+          nemesisDeaths[m.killer] = (nemesisDeaths[m.killer] || 0) + 1;
+          if (nemesisDeaths[m.killer] === 3) feed(`NEMESIS: ${kName} has killed you 3 times!`, vTeam);
+        }
       }
-      if (m.killer === myId && m.victim !== myId) { me.kills++; matchKills++; SND.kill(); onMyKill(); }
+      if (m.killer === myId && m.victim !== myId) {
+        me.kills++; matchKills++; SND.kill(); onMyKill();
+        if (lastKilledBy && m.victim === lastKilledBy) { // paid them back
+          announce('REVENGE!', '#ffd24a'); awardCoins(15); unlockAch('revenge'); lastKilledBy = null;
+        }
+      }
       break;
     }
     case 'level': {
@@ -901,7 +926,7 @@ function handleMsg(m) {
       if (m.id === myId) {
         me.pos.set(m.pos.x, m.pos.y, m.pos.z);
         me.vel.set(0, 0, 0);
-        me.hp = 100; me.dead = false;
+        me.hp = 100; me.dead = false; me.shieldUntil = 0;
         me.ammo = { rifle: 30, smg: 28, shotgun: 6, sniper: 5, lmg: 60, pistol: 12, bazooka: 1 };
         me.blocks = AGENTS[myAgent]?.blocks || 64; me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.reloading = false;
         me.ry = myTeam === 'red' ? -Math.PI / 2 : Math.PI / 2; me.rx = 0;
@@ -955,7 +980,7 @@ function handleMsg(m) {
       $('scoreRed').textContent = scores.red;
       $('scoreBlue').textContent = scores.blue;
       killStreak = 0; multiKill = 0; firstBloodDone = false;
-      matchKills = 0; matchDeaths = 0; bestStreak = 0;
+      matchKills = 0; matchDeaths = 0; bestStreak = 0; lastKilledBy = null; for (const k in nemesisDeaths) delete nemesisDeaths[k]; me.shieldUntil = 0;
       matchStart = performance.now();
       for (const pm of pickupMeshes) pm.mesh.visible = true; // packs come back next match
       hideMatchOver();
@@ -2556,6 +2581,20 @@ function updateMatchTimer() {
   const s = Math.max(0, Math.floor((performance.now() - matchStart) / 1000));
   el.textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
 }
+// Live streak + overshield badges under the minimap.
+function updateBuffHud(now) {
+  const sh = $('streakHud');
+  if (sh) {
+    if (killStreak >= 2 && !me.dead) { sh.style.display = 'block'; sh.textContent = 'STREAK ×' + killStreak; }
+    else sh.style.display = 'none';
+  }
+  const bh = $('shieldHud');
+  if (bh) {
+    const rem = me.shieldUntil - now;
+    if (rem > 0 && !me.dead) { bh.style.display = 'block'; bh.textContent = 'SHIELD ' + Math.ceil(rem / 1000) + 's'; }
+    else bh.style.display = 'none';
+  }
+}
 function drawMinimap() {
   const cv = $('minimap'); if (!cv) return;
   if (!miniCtx) miniCtx = cv.getContext('2d');
@@ -2636,7 +2675,7 @@ function loop() {
     updateFx(dt);
     updateViewModel(dt, moving > 0);
     if (tabHeld) updateScoreboard();
-    if (now - lastMini > 90) { lastMini = now; drawMinimap(); updateMatchTimer(); }
+    if (now - lastMini > 90) { lastMini = now; drawMinimap(); updateMatchTimer(); updateBuffHud(now); }
     if (!me.dead && me.hp > 0 && me.hp < 30 && now - lastLowHp > 850) { lastLowHp = now; SND.lowhp(); }
 
     // clouds drift
