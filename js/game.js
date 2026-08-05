@@ -1321,7 +1321,7 @@ function updateFlagMeshes(flags) {
   for (const t of ['red', 'blue']) {
     const f = flags[t], g = flagMeshes[t];
     if (!f || !g) continue;
-    g.position.set(f.x, f.y - 0.5, f.z); // server y is base + 0.5; sit the group on the ground
+    g.position.set(f.x, f.y + 0.5, f.z); // ground surface is groundTop+1; sit the flag group on it
     g.userData.cloth.rotation.y = wobble;
     g.visible = true;
   }

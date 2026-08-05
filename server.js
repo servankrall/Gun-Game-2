@@ -199,8 +199,10 @@ const PICKUP_SPOTS = [[0, 16], [0, -16], [16, 0], [-16, 0]];
 const SUPPLY_SPOTS = [[10, -10], [-10, 10]]; // grenade + block resupply
 const PICKUP_HEAL = 40, PICKUP_RESPAWN = 12000;
 function makePickups(r) {
-  const health = PICKUP_SPOTS.map(([x, z]) => ({ x, y: groundTop(r, x, z) + 0.6, z, active: true, respawnAt: 0, type: 'health' }));
-  const supply = SUPPLY_SPOTS.map(([x, z]) => ({ x, y: groundTop(r, x, z) + 0.6, z, active: true, respawnAt: 0, type: 'supply' }));
+  // Ground surface sits at groundTop+1 (a block at y occupies [y,y+1]); float the
+  // pack ~0.4 above it so it isn't buried under the map.
+  const health = PICKUP_SPOTS.map(([x, z]) => ({ x, y: groundTop(r, x, z) + 1.4, z, active: true, respawnAt: 0, type: 'health' }));
+  const supply = SUPPLY_SPOTS.map(([x, z]) => ({ x, y: groundTop(r, x, z) + 1.4, z, active: true, respawnAt: 0, type: 'supply' }));
   return health.concat(supply);
 }
 
