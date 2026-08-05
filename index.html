@@ -357,6 +357,10 @@
   #matchTimer { position: absolute; top: 150px; left: 40px; font-size: 11px; color: #cfd6e6; text-shadow: 1px 1px 0 #000; font-variant-numeric: tabular-nums; }
   #streakHud { position: absolute; top: 170px; left: 40px; font-size: 11px; color: #ffb14a; text-shadow: 1px 1px 0 #000; display: none; }
   #shieldHud { position: absolute; top: 188px; left: 40px; font-size: 11px; color: #5ad1ff; text-shadow: 1px 1px 0 #000; display: none; padding: 1px 5px; border: 1px solid #5ad1ff88; border-radius: 3px; background: rgba(20,60,90,0.35); }
+  #zoneHud { position: absolute; top: 84px; left: 50%; transform: translateX(-50%); text-align: center; display: none; z-index: 4; }
+  #zoneHud #zoneTxt { font-size: 11px; letter-spacing: 1px; color: #cfd6e6; text-shadow: 1px 1px 0 #000; }
+  #zoneBarWrap { width: 180px; height: 6px; margin: 4px auto 0; background: rgba(0,0,0,0.5); border: 1px solid #000; }
+  #zoneBar { width: 0%; height: 100%; background: #aaa; transition: width .2s linear; }
   #announce {
     position: absolute; left: 50%; top: 22%; transform: translateX(-50%);
     font-size: 26px; color: #ffdd55; text-shadow: 3px 3px 0 #000; opacity: 0; pointer-events: none; white-space: nowrap;
@@ -425,6 +429,7 @@
           <span class="mode active" data-mode="dm">DEATHMATCH</span>
           <span class="mode" data-mode="ctf">CAPTURE THE FLAG</span>
           <span class="mode" data-mode="gg">GUN GAME</span>
+          <span class="mode" data-mode="dom">DOMINATION</span>
         </div>
       </div>
       <div class="bside right">
@@ -510,6 +515,7 @@
     <div id="matchTimer">00:00</div>
     <div id="streakHud"></div>
     <div id="shieldHud"></div>
+    <div id="zoneHud"><span id="zoneTxt"></span><div id="zoneBarWrap"><div id="zoneBar"></div></div></div>
     <div id="announce"></div>
     <div id="matchOver">
       <div class="t" id="matchOverTitle">RED TEAM WINS</div>

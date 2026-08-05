@@ -143,7 +143,11 @@ const CFG = {
   regenRate: 14,           // HP restored per second while regenerating
   captureLimit: 3,         // flag captures to win a CTF match
   flagReturn: 30000,       // ms a dropped flag waits before auto-returning home
+  domLimit: 100,           // Domination points to win a match
 };
+// Domination: a single central hill. Stand in it (with no enemy present) to
+// capture it, then hold it to bank points over time.
+const ZONE_CX = 0, ZONE_CZ = 0, ZONE_R = 8, ZONE_CAP_SECONDS = 5;
 const WEAPON = { rifle: { dmg: 16, rate: 220, range: 22 } };
 // Gun Game weapon ladder: every kill promotes the killer one rung, and the
 // first player to score a kill with the final rung wins. The last rung is the
@@ -441,12 +445,14 @@ export class GameServer extends DurableObject {
     if (r.clients.size === 1) {
       if (m.mode === 'ctf') { r.mode = 'ctf'; r.flags = makeFlags(r); }
       else if (m.mode === 'gg') { r.mode = 'gg'; }
+      else if (m.mode === 'dom') { r.mode = 'dom'; r.zone = { owner: null, cap: 0, capTeam: null, accum: 0, contested: false }; }
     }
 
     this.send(ws, {
       t: 'welcome', id, team, pos, ry: player.ry, scores: r.scores, room: roomId, count: this.count(r),
-      mode: r.mode, map: r.map, limit: r.mode === 'ctf' ? CFG.captureLimit : r.mode === 'gg' ? GG_LADDER.length : CFG.scoreLimit,
+      mode: r.mode, map: r.map, limit: r.mode === 'ctf' ? CFG.captureLimit : r.mode === 'gg' ? GG_LADDER.length : r.mode === 'dom' ? CFG.domLimit : CFG.scoreLimit,
       flags: r.flags ? this.flagPub(r) : undefined,
+      zone: r.mode === 'dom' && r.zone ? this.zonePub(r) : undefined,
       pickups: r.pickups.map(p => ({ x: p.x, y: p.y, z: p.z, active: p.active, type: p.type })),
       players: this.entities(r).filter(e => e.id !== id).map(e => this.pub(e)),
       placed: [...r.placed.values()], destroyed: [...r.destroyed.values()],
@@ -587,6 +593,47 @@ export class GameServer extends DurableObject {
     const f = r.flags; const p = t => ({ x: f[t].pos.x, y: f[t].pos.y, z: f[t].pos.z, carrier: f[t].carrier, atHome: f[t].atHome });
     return { red: p('red'), blue: p('blue') };
   }
+
+  // Domination hill state for the client HUD/visual.
+  zonePub(r) {
+    const z = r.zone;
+    return { owner: z.owner, cap: Math.max(0, Math.min(1, z.cap / ZONE_CAP_SECONDS)), capTeam: z.capTeam, contested: z.contested };
+  }
+  // Tick the central hill: capture when one team holds it alone, then bank points.
+  updateZone(r, dt) {
+    if (r.mode !== 'dom' || !r.zone || r.over) return;
+    const z = r.zone; let red = 0, blue = 0;
+    for (const e of this.entities(r)) {
+      if (!e.alive) continue;
+      const dx = e.pos.x - ZONE_CX, dz = e.pos.z - ZONE_CZ;
+      if (dx * dx + dz * dz <= ZONE_R * ZONE_R) { if (e.team === 'red') red++; else if (e.team === 'blue') blue++; }
+    }
+    // Majority rule: whichever team has more bodies in the ring controls it.
+    // (Requiring the enemy to be fully absent made the hill a permanent scrum.)
+    const holder = red > blue ? 'red' : blue > red ? 'blue' : null;
+    z.contested = red > 0 && blue > 0 && red === blue;
+    if (holder && holder !== z.owner) {
+      if (z.capTeam !== holder) { z.capTeam = holder; z.cap = 0; }
+      z.cap += dt;
+      if (z.cap >= ZONE_CAP_SECONDS) {
+        z.owner = holder; z.cap = 0; z.capTeam = null; z.accum = 0;
+        this.broadcast(r, { t: 'zone', ev: 'capture', team: holder });
+      }
+    } else if (holder === z.owner) {
+      z.cap = 0; z.capTeam = null; // owner reasserting majority — meter idle
+    }
+    // Owner banks points unless the enemy currently holds the majority (capturing).
+    const enemyTeam = z.owner === 'red' ? 'blue' : 'red';
+    if (z.owner && holder !== enemyTeam) {
+      z.accum = (z.accum || 0) + dt;
+      while (z.accum >= 1) {
+        z.accum -= 1;
+        r.scores[z.owner] = (r.scores[z.owner] || 0) + 2;
+        this.broadcast(r, { t: 'scores', scores: r.scores });
+        if (r.scores[z.owner] >= CFG.domLimit) { this.endMatch(r, z.owner); return; }
+      }
+    }
+  }
   dropFlagIfCarrier(r, ent) {
     for (const t of ['red', 'blue']) {
       const f = r.flags[t];
@@ -675,6 +722,7 @@ export class GameServer extends DurableObject {
     r.over = false;
     r.scores = { red: 0, blue: 0 };
     r.placed.clear(); r.destroyed.clear();
+    if (r.mode === 'dom') r.zone = { owner: null, cap: 0, capTeam: null, accum: 0, contested: false };
     if (r.pickups) for (const pk of r.pickups) { pk.active = true; pk.respawnAt = 0; }
     if (r.mode === 'ctf') r.flags = makeFlags(r);
     for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.level = 0; p.streak = 0; p.shieldUntil = 0; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
@@ -766,6 +814,10 @@ export class GameServer extends DurableObject {
             this.applyDamage(r, target, Math.round(w.dmg * (head ? 2 : 1)), bot, head, 'rifle');
           }
         }
+      } else if (r.mode === 'dom' && Math.hypot(bot.pos.x - ZONE_CX, bot.pos.z - ZONE_CZ) > 5) {
+        // Domination: with no enemy in sight, march on the central hill to contest it.
+        const ang = Math.atan2(-(ZONE_CX - bot.pos.x), -(ZONE_CZ - bot.pos.z));
+        bot.ry = ang; this.stepBot(r, bot, ang, dt); moving = 0.8;
       } else {
         if (now >= bot.repick) { bot.repick = now + 1200 + Math.random() * 1600; bot.wander += (Math.random() - 0.5) * 2; }
         this.stepBot(r, bot, bot.wander, dt); moving = 0.6; bot.ry = bot.wander;
@@ -822,10 +874,11 @@ export class GameServer extends DurableObject {
           if (!e.bot && nowHp !== was) { const c = r.clients.get(e.id); if (c) this.send(c.ws, { t: 'heal', hp: nowHp }); }
         }
         this.updateFlags(r, now);
+        this.updateZone(r, dt);
         this.updatePickups(r, now);
         const states = [];
         for (const e of this.entities(r)) { if (!e.alive) continue; states.push({ id: e.id, pos: e.pos, ry: e.ry, rx: e.rx, anim: e.anim, hp: Math.round(e.hp) }); }
-        if (states.length) this.broadcast(r, { t: 'states', states, flags: r.mode === 'ctf' && r.flags ? this.flagPub(r) : undefined });
+        if (states.length) this.broadcast(r, { t: 'states', states, flags: r.mode === 'ctf' && r.flags ? this.flagPub(r) : undefined, zone: r.mode === 'dom' && r.zone ? this.zonePub(r) : undefined });
       }
     }, CFG.tick);
   }

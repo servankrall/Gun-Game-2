@@ -77,7 +77,7 @@ const mobileMove = { x: 0, z: 0, active: false };
 let myRoom = (new URLSearchParams(location.search).get('room') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
 let scoreLimit = 150;
 let botDiff = 'normal';
-let gameMode = 'dm';   // 'dm' (deathmatch) | 'ctf' (capture the flag) | 'gg' (gun game)
+let gameMode = 'dm';   // 'dm' (deathmatch) | 'ctf' (capture the flag) | 'gg' (gun game) | 'dom' (domination)
 let menuMode = 'dm';   // mode chosen on the menu, sent at join
 let myLevel = 0;       // gun-game rung (index into GG_LADDER)
 let sunLight = null, ambLight = null;
@@ -436,7 +436,7 @@ function setupMenu() {
   renderAgent();
 
   // game mode selection (Deathmatch / Capture the Flag)
-  { const sm = localStorage.getItem('blockade_mode'); menuMode = (sm === 'ctf' || sm === 'gg') ? sm : 'dm'; }
+  { const sm = localStorage.getItem('blockade_mode'); menuMode = (sm === 'ctf' || sm === 'gg' || sm === 'dom') ? sm : 'dm'; }
   const modes = document.querySelectorAll('#modeRow .mode');
   const syncModes = () => modes.forEach(el => el.classList.toggle('active', el.dataset.mode === menuMode));
   modes.forEach(el => el.addEventListener('click', () => { menuMode = el.dataset.mode; localStorage.setItem('blockade_mode', menuMode); syncModes(); }));
@@ -705,6 +705,7 @@ function renderAuth() {
 function leaveGame() {
   try { document.exitPointerLock(); } catch {}
   hideMatchOver();
+  hideZone();
   const ph = $('pauseHint'); if (ph) ph.style.display = 'none';
   if (ws && (ws.readyState === 0 || ws.readyState === 1)) { try { ws.close(); } catch {} } // onclose returns to the menu
   else { inGame = false; $('hud').style.display = 'none'; $('menu').style.display = 'flex'; connectLobby(); }
@@ -767,6 +768,7 @@ function handleMsg(m) {
       for (const d of m.destroyed || []) removeBlockLocal(d.x, d.y, d.z, true);
       for (const b of m.placed) placeBlockLocal(b.x, b.y, b.z, b.team);
       if (gameMode === 'ctf') { ensureFlags(); if (m.flags) updateFlagMeshes(m.flags); }
+      if (gameMode === 'dom') { ensureZone(); if (m.zone) updateZoneState(m.zone); } else hideZone();
       if (gameMode === 'gg') { myLevel = 0; }
       startGame();
       matchStart = performance.now();
@@ -805,9 +807,19 @@ function handleMsg(m) {
       else if (m.ev === 'drop') { feed(`The ${tn} flag was dropped!`, m.team); }
       break;
     }
+    case 'zone': {
+      if (m.ev === 'capture') {
+        const tn = m.team === 'red' ? 'RED' : 'BLUE';
+        feed(`${tn} captured the zone!`, m.team);
+        if (m.team === myTeam) { announce('ZONE CAPTURED!', '#ffd24a'); SND.kill(); }
+        else announce('ENEMY TOOK THE ZONE', '#ff5555');
+      }
+      break;
+    }
     case 'states':
       dbgOnStates(m);
       if (m.flags) updateFlagMeshes(m.flags);
+      if (m.zone) updateZoneState(m.zone);
       for (const s of m.states) {
         if (s.id === myId) continue;
         const r = remotes.get(s.id);
@@ -988,6 +1000,7 @@ function handleMsg(m) {
       if (gameMode === 'gg') { myLevel = 0; applyGunGameWeapon(); }
       feed(gameMode === 'ctf' ? `New match — capture ${scoreLimit} flags to win!`
          : gameMode === 'gg' ? `New match — work through all ${scoreLimit} weapons to win!`
+         : gameMode === 'dom' ? `New match — hold the zone to ${scoreLimit} points!`
          : `New match — first to ${scoreLimit} kills wins!`, myTeam);
       break;
     default: handleAccountMsg(m); // account/social messages can arrive on the game socket too
@@ -1351,6 +1364,57 @@ function updateFlagMeshes(flags) {
     g.visible = true;
   }
 }
+
+// ============================================================
+// Domination hill (central capture zone)
+// ============================================================
+let zoneMesh = null, zoneState = null;
+const ZONE_RADIUS = 8;
+function zoneColor(owner) { return owner === 'red' ? 0xff5555 : owner === 'blue' ? 0x7f9fff : 0x999999; }
+function zoneCss(owner) { return owner === 'red' ? '#ff5555' : owner === 'blue' ? '#7f9fff' : '#aaaaaa'; }
+function ensureZone() {
+  if (zoneMesh) return;
+  const g = new THREE.Group();
+  const wall = new THREE.Mesh(
+    new THREE.CylinderGeometry(ZONE_RADIUS, ZONE_RADIUS, 6, 40, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x999999, transparent: true, opacity: 0.14, side: THREE.DoubleSide, depthWrite: false })
+  );
+  wall.position.y = 4; // spans ground surface (y=1) up to y=7
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(ZONE_RADIUS - 0.4, ZONE_RADIUS, 48),
+    new THREE.MeshBasicMaterial({ color: 0x999999, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false })
+  );
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 1.06; // just above the ground surface
+  g.add(wall); g.add(ring);
+  g.userData = { wall, ring };
+  g.visible = false;
+  scene.add(g);
+  zoneMesh = g;
+}
+function updateZoneState(z) {
+  ensureZone();
+  zoneState = z;
+  const baseCol = zoneColor(z.contested ? null : z.owner);
+  const capCol = z.capTeam ? zoneColor(z.capTeam) : baseCol;
+  zoneMesh.userData.wall.material.color.setHex(baseCol);
+  zoneMesh.userData.ring.material.color.setHex(z.capTeam ? capCol : baseCol);
+  zoneMesh.userData.wall.material.opacity = z.owner ? 0.22 : 0.13;
+  zoneMesh.visible = true;
+  updateZoneHud(z);
+}
+function updateZoneHud(z) {
+  const txt = $('zoneTxt'), bar = $('zoneBar'), hud = $('zoneHud');
+  if (!hud) return;
+  hud.style.display = 'block';
+  let t, col, frac;
+  if (z.contested) { t = 'ZONE CONTESTED'; col = '#ffd24a'; frac = z.owner ? 1 : 0; }
+  else if (z.capTeam) { t = (z.capTeam === myTeam ? 'CAPTURING ' : 'LOSING ZONE ') + Math.round(z.cap * 100) + '%'; col = zoneCss(z.capTeam); frac = z.cap; }
+  else if (z.owner) { t = (z.owner === myTeam ? 'YOUR TEAM HOLDS THE ZONE' : (z.owner === 'red' ? 'RED' : 'BLUE') + ' HOLDS THE ZONE'); col = zoneCss(z.owner); frac = 1; }
+  else { t = 'CAPTURE THE ZONE'; col = '#cfd6e6'; frac = 0; }
+  if (txt) { txt.textContent = t; txt.style.color = col; }
+  if (bar) { bar.style.width = Math.round(Math.max(0, Math.min(1, frac)) * 100) + '%'; bar.style.background = col; }
+}
+function hideZone() { if (zoneMesh) zoneMesh.visible = false; zoneState = null; const h = $('zoneHud'); if (h) h.style.display = 'none'; }
 
 // ============================================================
 // Remote players (blocky characters)
@@ -2613,6 +2677,13 @@ function drawMinimap() {
     if (Math.hypot(px - R, py - R) > R - 2) continue;
     g.fillStyle = pm.type === 'supply' ? '#c8b84a' : '#49c26a';
     g.fillRect(px - 2, py - 2, 4, 4);
+  }
+  // Domination zone (circle marker at origin, coloured by owner)
+  if (gameMode === 'dom') {
+    const [zx, zy] = plot(0, 0);
+    g.strokeStyle = zoneState ? (zoneState.contested ? '#ffd24a' : zoneCss(zoneState.owner)) : '#aaaaaa';
+    g.lineWidth = 1.6;
+    g.beginPath(); g.arc(zx, zy, Math.min(ZONE_RADIUS * scale, R - 2), 0, Math.PI * 2); g.stroke();
   }
   // CTF flags (diamond markers)
   if (gameMode === 'ctf' && flagMeshes.red) {
