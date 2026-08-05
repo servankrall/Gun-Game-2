@@ -1013,9 +1013,32 @@ function updateCount(n) {
   const el = $('playerCount');
   if (el) el.textContent = '◉ ' + n;
 }
+// End-of-match MVP + personal medals (with one-time coin bonuses).
+function renderMatchAwards() {
+  const box = $('matchAwards'); if (!box) return;
+  const all = [{ name: myName, kills: matchKills, me: true },
+    ...[...remotes.values()].map(r => ({ name: r.name, kills: r.kills || 0 }))];
+  let mvp = all[0]; for (const p of all) if (p.kills > mvp.kills) mvp = p;
+  const iAmMvp = mvp.me && mvp.kills > 0;
+  const kd = matchDeaths > 0 ? matchKills / matchDeaths : matchKills;
+  const medals = [];
+  if (iAmMvp) medals.push({ n: 'MVP', c: 50 });
+  if (matchKills >= 3 && kd >= 2) medals.push({ n: 'SHARPSHOOTER', c: 25 });
+  if (bestStreak >= 5) medals.push({ n: 'ON FIRE', c: 25 });
+  if (bestStreak >= 10) medals.push({ n: 'UNSTOPPABLE', c: 40 });
+  if (matchKills >= 10) medals.push({ n: 'SLAYER', c: 30 });
+  let bonus = 0; for (const md of medals) bonus += md.c;
+  if (bonus) awardCoins(bonus);
+  const mvpLine = mvp.kills > 0 ? `<div class="mvp">MVP: <b>${mvp.name}${iAmMvp ? ' (you)' : ''}</b> — ${mvp.kills} kills</div>` : '';
+  const medalHtml = medals.length
+    ? '<div class="medals">' + medals.map(md => `<span class="medal">${md.n} <i>+${md.c}</i></span>`).join('') + '</div>'
+    : '<div class="medals none">No medals this match — keep fighting!</div>';
+  box.innerHTML = mvpLine + medalHtml;
+}
 function showMatchOver(winner, sc, winnerName) {
   if (sc) { Object.assign(scores, sc); $('scoreRed').textContent = scores.red; $('scoreBlue').textContent = scores.blue; }
   const st = $('matchStats'); if (st) st.textContent = `You — ${matchKills} kills · ${matchDeaths} deaths · best streak ${bestStreak}`;
+  renderMatchAwards();
   const o = $('matchOver');
   if (gameMode === 'gg') {
     const win = (winnerName && winnerName === myName);
