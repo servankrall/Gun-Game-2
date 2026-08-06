@@ -77,7 +77,8 @@ const mobileMove = { x: 0, z: 0, active: false };
 let myRoom = (new URLSearchParams(location.search).get('room') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
 let scoreLimit = 150;
 let botDiff = 'normal';
-let gameMode = 'dm';   // 'dm' (deathmatch) | 'ctf' (capture the flag) | 'gg' (gun game) | 'dom' (domination)
+let gameMode = 'dm';   // 'dm' | 'ctf' | 'gg' | 'dom' (domination) | 'surv' (survival)
+let waveNum = 0;       // current Survival wave
 let menuMode = 'dm';   // mode chosen on the menu, sent at join
 let myLevel = 0;       // gun-game rung (index into GG_LADDER)
 let sunLight = null, ambLight = null;
@@ -436,7 +437,7 @@ function setupMenu() {
   renderAgent();
 
   // game mode selection (Deathmatch / Capture the Flag)
-  { const sm = localStorage.getItem('blockade_mode'); menuMode = (sm === 'ctf' || sm === 'gg' || sm === 'dom') ? sm : 'dm'; }
+  { const sm = localStorage.getItem('blockade_mode'); menuMode = (sm === 'ctf' || sm === 'gg' || sm === 'dom' || sm === 'surv') ? sm : 'dm'; }
   const modes = document.querySelectorAll('#modeRow .mode');
   const syncModes = () => modes.forEach(el => el.classList.toggle('active', el.dataset.mode === menuMode));
   modes.forEach(el => el.addEventListener('click', () => { menuMode = el.dataset.mode; localStorage.setItem('blockade_mode', menuMode); syncModes(); }));
@@ -706,6 +707,7 @@ function leaveGame() {
   try { document.exitPointerLock(); } catch {}
   hideMatchOver();
   hideZone();
+  { const wh = $('waveHud'); if (wh) wh.style.display = 'none'; const st = $('scoreTop'); if (st) st.style.display = ''; }
   const ph = $('pauseHint'); if (ph) ph.style.display = 'none';
   if (ws && (ws.readyState === 0 || ws.readyState === 1)) { try { ws.close(); } catch {} } // onclose returns to the menu
   else { inGame = false; $('hud').style.display = 'none'; $('menu').style.display = 'flex'; connectLobby(); }
@@ -769,6 +771,7 @@ function handleMsg(m) {
       for (const b of m.placed) placeBlockLocal(b.x, b.y, b.z, b.team);
       if (gameMode === 'ctf') { ensureFlags(); if (m.flags) updateFlagMeshes(m.flags); }
       if (gameMode === 'dom') { ensureZone(); if (m.zone) updateZoneState(m.zone); } else hideZone();
+      if (gameMode === 'surv') { waveNum = m.wave || 0; }
       if (gameMode === 'gg') { myLevel = 0; }
       startGame();
       matchStart = performance.now();
@@ -805,6 +808,18 @@ function handleMsg(m) {
       else if (m.ev === 'capture') { feed(`${m.name || 'Someone'} captured the ${tn} flag!`, m.team); SND.kill(); announce('FLAG CAPTURED!', '#ffd24a'); }
       else if (m.ev === 'returned') { feed(`The ${tn} flag was returned.`, m.team); }
       else if (m.ev === 'drop') { feed(`The ${tn} flag was dropped!`, m.team); }
+      break;
+    }
+    case 'wave': {
+      if (m.ev === 'start') {
+        waveNum = m.wave;
+        announce(`WAVE ${m.wave} — ${m.enemies} RAIDERS!`, '#ff7733'); SND.spawn();
+        feed(`Wave ${m.wave} incoming — ${m.enemies} raiders!`, myTeam);
+      } else if (m.ev === 'clear') {
+        announce(`WAVE ${m.wave} CLEARED!  +${m.reward}`, '#ffd24a'); SND.kill();
+        awardCoins(m.reward || 0);
+        feed(`Wave ${m.wave} cleared! Next wave soon…`, myTeam);
+      }
       break;
     }
     case 'zone': {
@@ -998,9 +1013,11 @@ function handleMsg(m) {
       hideMatchOver();
       resetWorld();
       if (gameMode === 'gg') { myLevel = 0; applyGunGameWeapon(); }
+      waveNum = 0;
       feed(gameMode === 'ctf' ? `New match — capture ${scoreLimit} flags to win!`
          : gameMode === 'gg' ? `New match — work through all ${scoreLimit} weapons to win!`
          : gameMode === 'dom' ? `New match — hold the zone to ${scoreLimit} points!`
+         : gameMode === 'surv' ? `New run — survive all ${scoreLimit} waves!`
          : `New match — first to ${scoreLimit} kills wins!`, myTeam);
       break;
     default: handleAccountMsg(m); // account/social messages can arrive on the game socket too
@@ -1047,6 +1064,15 @@ function showMatchOver(winner, sc, winnerName) {
     $('matchOverTitle').textContent = (winnerName || 'SOMEONE') + ' WINS!';
     $('matchOverTitle').style.color = win ? '#ffd24a' : (TEAM_COL[winner] || '#fff');
     $('matchOverSub').textContent = (win ? 'You mastered every weapon! ' : 'Beaten to the last weapon. ') + 'Next match starting...';
+    o.style.display = 'flex';
+    return;
+  }
+  if (gameMode === 'surv') {
+    awardCoins(150);
+    unlockAch('win');
+    $('matchOverTitle').textContent = 'YOU SURVIVED!';
+    $('matchOverTitle').style.color = '#ffd24a';
+    $('matchOverSub').textContent = `Cleared all ${scoreLimit} waves! Next run starting...`;
     o.style.display = 'flex';
     return;
   }
@@ -2682,6 +2708,16 @@ function updateBuffHud(now) {
     else bh.style.display = 'none';
   }
 }
+// Survival: show the wave counter + raiders remaining (in place of team score).
+function updateWaveHud() {
+  const el = $('waveHud'); if (!el) return;
+  if (gameMode !== 'surv') { el.style.display = 'none'; return; }
+  const st = $('scoreTop'); if (st) st.style.display = 'none';
+  const alive = [...remotes.values()].filter(r => r.team !== myTeam && r.alive).length;
+  el.style.display = 'block';
+  const sub = waveNum < 1 ? 'get ready…' : alive > 0 ? `${alive} raider${alive === 1 ? '' : 's'} left` : 'brace for the next wave…';
+  el.innerHTML = `WAVE <b>${Math.max(waveNum, 0)}</b> / ${scoreLimit}<span class="sub">${sub}</span>`;
+}
 function drawMinimap() {
   const cv = $('minimap'); if (!cv) return;
   if (!miniCtx) miniCtx = cv.getContext('2d');
@@ -2769,7 +2805,7 @@ function loop() {
     updateFx(dt);
     updateViewModel(dt, moving > 0);
     if (tabHeld) updateScoreboard();
-    if (now - lastMini > 90) { lastMini = now; drawMinimap(); updateMatchTimer(); updateBuffHud(now); }
+    if (now - lastMini > 90) { lastMini = now; drawMinimap(); updateMatchTimer(); updateBuffHud(now); updateWaveHud(); }
     if (!me.dead && me.hp > 0 && me.hp < 30 && now - lastLowHp > 850) { lastLowHp = now; SND.lowhp(); }
 
     // clouds drift

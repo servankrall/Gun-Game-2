@@ -361,6 +361,9 @@
   #zoneHud #zoneTxt { font-size: 11px; letter-spacing: 1px; color: #cfd6e6; text-shadow: 1px 1px 0 #000; }
   #zoneBarWrap { width: 180px; height: 6px; margin: 4px auto 0; background: rgba(0,0,0,0.5); border: 1px solid #000; }
   #zoneBar { width: 0%; height: 100%; background: #aaa; transition: width .2s linear; }
+  #waveHud { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); text-align: center; display: none; z-index: 4; font-size: 13px; letter-spacing: 1px; color: #ff9d4a; text-shadow: 2px 2px 0 #000; }
+  #waveHud b { color: #fff; }
+  #waveHud .sub { display: block; font-size: 10px; color: #ffd24a; margin-top: 2px; letter-spacing: 0.5px; }
   #announce {
     position: absolute; left: 50%; top: 22%; transform: translateX(-50%);
     font-size: 26px; color: #ffdd55; text-shadow: 3px 3px 0 #000; opacity: 0; pointer-events: none; white-space: nowrap;
@@ -436,6 +439,7 @@
           <span class="mode" data-mode="ctf">CAPTURE THE FLAG</span>
           <span class="mode" data-mode="gg">GUN GAME</span>
           <span class="mode" data-mode="dom">DOMINATION</span>
+          <span class="mode" data-mode="surv">SURVIVAL</span>
         </div>
       </div>
       <div class="bside right">
@@ -522,6 +526,7 @@
     <div id="streakHud"></div>
     <div id="shieldHud"></div>
     <div id="zoneHud"><span id="zoneTxt"></span><div id="zoneBarWrap"><div id="zoneBar"></div></div></div>
+    <div id="waveHud"></div>
     <div id="announce"></div>
     <div id="matchOver">
       <div class="t" id="matchOverTitle">RED TEAM WINS</div>

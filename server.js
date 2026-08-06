@@ -139,11 +139,15 @@ const CFG = {
   botTeamTarget: 3,        // desired combatants (players+bots) per team
   botCap: 6,               // max bots per room
   botNames: ['Ozan', 'Deniz', 'Kaya', 'Ares', 'Bora', 'Cem', 'Efe', 'Mert', 'Rux', 'Zane', 'Nova', 'Kartal'],
+  raiderNames: ['Raider', 'Marauder', 'Reaver', 'Ghoul', 'Bandit', 'Stalker', 'Brute', 'Savage', 'Ravager', 'Wraith'],
   regenDelay: 5000,        // ms without taking damage before health regenerates
   regenRate: 14,           // HP restored per second while regenerating
   captureLimit: 3,         // flag captures to win a CTF match
   flagReturn: 30000,       // ms a dropped flag waits before auto-returning home
   domLimit: 100,           // Domination points to win a match
+  survWaves: 8,            // Survival: clear this many waves to win
+  survTeammates: 3,        // Survival: friendly AI bots fighting alongside you
+  survZombieCap: 8,        // Survival: max raiders alive in one wave
 };
 // Domination: a single central hill. Stand in it (with no enemy present) to
 // capture it, then hold it to bank points over time.
@@ -175,6 +179,17 @@ const agentOf = id => AGENTS[id] ? id : 'soldier';
 function spawnFor(r, team) {
   const z = Math.random() * 16 - 8;
   const x = team === 'red' ? -28 : 28;
+  return { x, y: groundTop(r, x, z) + 1.1, z };
+}
+// Survival raiders lay siege from the edges: scatter them around the arena
+// perimeter (kept off the survivors' spawn corner) so they close in from all
+// directions instead of funnelling single-file through the central cover.
+function raiderSpawn(r) {
+  const ang = Math.random() * Math.PI * 2;
+  const rad = 22 + Math.random() * 7;
+  let x = Math.round(Math.cos(ang) * rad), z = Math.round(Math.sin(ang) * rad);
+  if (x < -18) x = -x >> 1; // keep them out of the survivors' back line
+  x = Math.max(-30, Math.min(30, x)); z = Math.max(-30, Math.min(30, z));
   return { x, y: groundTop(r, x, z) + 1.1, z };
 }
 function ryFor(team) { return team === 'red' ? -Math.PI / 2 : Math.PI / 2; }
@@ -431,7 +446,16 @@ export class GameServer extends DurableObject {
   handleJoin(ws, m, roomId) {
     const r = this.room(roomId);
     const id = this.nextId++;
-    const team = this.pickTeam(r);
+    // Lock the room's game mode on the very first player, BEFORE team assignment
+    // (Survival forces everyone onto one team, so mode must be known first). The
+    // map is random (set at room creation) and bot difficulty is mixed per-bot.
+    if (r.clients.size === 0) {
+      if (m.mode === 'ctf') { r.mode = 'ctf'; r.flags = makeFlags(r); }
+      else if (m.mode === 'gg') { r.mode = 'gg'; }
+      else if (m.mode === 'dom') { r.mode = 'dom'; r.zone = { owner: null, cap: 0, capTeam: null, accum: 0, contested: false }; }
+      else if (m.mode === 'surv') { r.mode = 'surv'; r.wave = 0; r.waveState = 'prep'; r.nextWaveAt = Date.now() + 4000; }
+    }
+    const team = r.mode === 'surv' ? 'red' : this.pickTeam(r); // survivors are all one team
     const name = String(m.name || 'Player').slice(0, 16) || 'Player';
     const pos = spawnFor(r, team);
     const agent = agentOf(m.agent);
@@ -440,19 +464,13 @@ export class GameServer extends DurableObject {
       color: (typeof m.color === 'number' && m.color >= 0 && m.color <= 0xffffff) ? (m.color | 0) : null,
       agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.clients.set(id, { ws, player });
-    // First player in a room sets only the game mode; the map is random (set at
-    // room creation) and bot difficulty is mixed per-bot.
-    if (r.clients.size === 1) {
-      if (m.mode === 'ctf') { r.mode = 'ctf'; r.flags = makeFlags(r); }
-      else if (m.mode === 'gg') { r.mode = 'gg'; }
-      else if (m.mode === 'dom') { r.mode = 'dom'; r.zone = { owner: null, cap: 0, capTeam: null, accum: 0, contested: false }; }
-    }
 
     this.send(ws, {
       t: 'welcome', id, team, pos, ry: player.ry, scores: r.scores, room: roomId, count: this.count(r),
-      mode: r.mode, map: r.map, limit: r.mode === 'ctf' ? CFG.captureLimit : r.mode === 'gg' ? GG_LADDER.length : r.mode === 'dom' ? CFG.domLimit : CFG.scoreLimit,
+      mode: r.mode, map: r.map, limit: r.mode === 'ctf' ? CFG.captureLimit : r.mode === 'gg' ? GG_LADDER.length : r.mode === 'dom' ? CFG.domLimit : r.mode === 'surv' ? CFG.survWaves : CFG.scoreLimit,
       flags: r.flags ? this.flagPub(r) : undefined,
       zone: r.mode === 'dom' && r.zone ? this.zonePub(r) : undefined,
+      wave: r.mode === 'surv' ? r.wave : undefined,
       pickups: r.pickups.map(p => ({ x: p.x, y: p.y, z: p.z, active: p.active, type: p.type })),
       players: this.entities(r).filter(e => e.id !== id).map(e => this.pub(e)),
       placed: [...r.placed.values()], destroyed: [...r.destroyed.values()],
@@ -599,6 +617,30 @@ export class GameServer extends DurableObject {
     const z = r.zone;
     return { owner: z.owner, cap: Math.max(0, Math.min(1, z.cap / ZONE_CAP_SECONDS)), capTeam: z.capTeam, contested: z.contested };
   }
+  // Survival: run the wave clock. Spawn a wave of raiders, wait until they're
+  // all dead, reward the survivors, then queue the next (bigger) wave.
+  updateWaves(r, now) {
+    if (r.mode !== 'surv' || r.over) return;
+    if (r.waveState === 'active') {
+      const raiders = [...r.bots.values()].filter(b => b.zombie);
+      if (raiders.length > 0 && raiders.every(b => !b.alive)) {
+        const reward = 20 + r.wave * 5;
+        this.broadcast(r, { t: 'wave', ev: 'clear', wave: r.wave, reward, next: r.wave + 1 });
+        for (const b of raiders) this.removeBot(r, b.id); // clear the corpses
+        r.scores.red = r.wave; // score tracks waves cleared
+        this.broadcast(r, { t: 'scores', scores: r.scores });
+        if (r.wave >= CFG.survWaves) { this.endMatch(r, 'red'); return; }
+        r.waveState = 'prep'; r.nextWaveAt = now + 6000;
+      }
+    } else if (now >= r.nextWaveAt) {
+      r.wave++;
+      const count = Math.min(3 + r.wave, CFG.survZombieCap);
+      const base = r.wave < 3 ? 'easy' : r.wave < 6 ? 'normal' : 'hard';
+      for (let i = 0; i < count; i++) this.addBot(r, 'blue', { zombie: true, tier: Math.random() < 0.3 ? 'hard' : base });
+      r.waveState = 'active';
+      this.broadcast(r, { t: 'wave', ev: 'start', wave: r.wave, enemies: count });
+    }
+  }
   // Tick the central hill: capture when one team holds it alone, then bank points.
   updateZone(r, dt) {
     if (r.mode !== 'dom' || !r.zone || r.over) return;
@@ -723,6 +765,10 @@ export class GameServer extends DurableObject {
     r.scores = { red: 0, blue: 0 };
     r.placed.clear(); r.destroyed.clear();
     if (r.mode === 'dom') r.zone = { owner: null, cap: 0, capTeam: null, accum: 0, contested: false };
+    if (r.mode === 'surv') {
+      for (const b of [...r.bots.values()]) if (b.zombie) this.removeBot(r, b.id); // clear leftover raiders
+      r.wave = 0; r.waveState = 'prep'; r.nextWaveAt = Date.now() + 4000;
+    }
     if (r.pickups) for (const pk of r.pickups) { pk.active = true; pk.respawnAt = 0; }
     if (r.mode === 'ctf') r.flags = makeFlags(r);
     for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.level = 0; p.streak = 0; p.shieldUntil = 0; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
@@ -749,6 +795,13 @@ export class GameServer extends DurableObject {
   balanceBots(r) {
     if (!CFG.bots) return;
     if (r.clients.size === 0) { for (const b of [...r.bots.keys()]) this.removeBot(r, b); return; }
+    if (r.mode === 'surv') {
+      // Survival: keep a fixed squad of friendly AI teammates on red. The blue
+      // raiders are spawned by the wave manager, not here.
+      const redBots = [...r.bots.values()].filter(b => b.team === 'red').length;
+      for (let i = redBots; i < CFG.survTeammates; i++) this.addBot(r, 'red');
+      return;
+    }
     // Fill each team up to the target combatant count. Humans count toward the
     // target, so every human who joins quietly frees exactly one bot slot on
     // their side — the rest of the bots stay in the match.
@@ -763,22 +816,24 @@ export class GameServer extends DurableObject {
       }
     }
   }
-  addBot(r, team) {
+  addBot(r, team, opts = {}) {
     const id = this.nextId++;
     // Pick a name nobody in the room is already using (no more "3 Efes").
     const used = new Set(this.entities(r).map(e => e.name));
-    const free = CFG.botNames.filter(n => !used.has(n));
+    const pool = opts.zombie ? CFG.raiderNames : CFG.botNames;
+    const free = pool.filter(n => !used.has(n));
     let nm;
     if (free.length) nm = free[Math.floor(Math.random() * free.length)];
-    else { let i = 2; do { nm = CFG.botNames[Math.floor(Math.random() * CFG.botNames.length)] + ' ' + i++; } while (used.has(nm)); }
-    const pos = spawnFor(r, team);
-    // Mixed difficulty: each bot rolls its own tier (some easy, some hard).
-    const tier = ['easy', 'easy', 'normal', 'normal', 'normal', 'hard'][Math.floor(Math.random() * 6)];
+    else { let i = 2; do { nm = pool[Math.floor(Math.random() * pool.length)] + ' ' + i++; } while (used.has(nm)); }
+    const pos = opts.zombie ? raiderSpawn(r) : spawnFor(r, team);
+    // Mixed difficulty: each bot rolls its own tier (some easy, some hard) unless forced.
+    const tier = opts.tier || ['easy', 'easy', 'normal', 'normal', 'normal', 'hard'][Math.floor(Math.random() * 6)];
     const skill = SKILL[tier];
     const agent = Object.keys(AGENTS)[Math.floor(Math.random() * Object.keys(AGENTS).length)];
-    const bot = { id, name: nm, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, level: 0, bot: true, nextShot: 0, wander: Math.random() * Math.PI * 2, repick: 0, respawnAt: 0, skill: skill.min + Math.random() * skill.span, lastHit: 0, agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
+    const bot = { id, name: nm, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, level: 0, bot: true, zombie: !!opts.zombie, nextShot: 0, wander: Math.random() * Math.PI * 2, repick: 0, respawnAt: 0, skill: skill.min + Math.random() * skill.span, lastHit: 0, agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.bots.set(id, bot);
     this.broadcast(r, { t: 'join', p: this.pub(bot) });
+    return bot;
   }
   removeBot(r, id) { if (r.bots.delete(id)) this.broadcast(r, { t: 'leave', id }); }
 
@@ -786,6 +841,7 @@ export class GameServer extends DurableObject {
     if (r.over) return;
     for (const bot of r.bots.values()) {
       if (!bot.alive) {
+        if (bot.zombie) continue; // raiders stay down — the wave clears when all are dead
         if (now >= bot.respawnAt) { bot.alive = true; bot.hp = 100; bot.pos = spawnFor(r, bot.team); this.broadcast(r, { t: 'respawn', id: bot.id, pos: bot.pos }); }
         continue;
       }
@@ -796,14 +852,20 @@ export class GameServer extends DurableObject {
         if (d < best) { best = d; target = e; }
       }
       let moving = 0;
-      if (target && best < 34) {
+      // Bots engage within 34 units; in Survival both sides advance from any
+      // range (raiders siege inward, survivors hunt down stragglers) so waves
+      // resolve. Perimeter raider spawns keep them from forming one stuck front.
+      if (target && (best < 34 || bot.zombie || r.mode === 'surv')) {
         const ang = Math.atan2(-(target.pos.x - bot.pos.x), -(target.pos.z - bot.pos.z));
         bot.ry = ang;
-        if (best > 6) { this.stepBot(r, bot, ang, dt); moving = 1; }
-        else { this.stepBot(r, bot, ang + Math.PI / 2 * (bot.id % 2 ? 1 : -1), dt * 0.6); moving = 0.6; }
         const w = WEAPON.rifle;
-        if (best < w.range && now >= bot.nextShot &&
-            losClear(r, bot.pos.x, bot.pos.y + 1.5, bot.pos.z, target.pos.x, target.pos.y + 1.0, target.pos.z)) {
+        const canSee = best < w.range &&
+          losClear(r, bot.pos.x, bot.pos.y + 1.5, bot.pos.z, target.pos.x, target.pos.y + 1.0, target.pos.z);
+        // Push in (chasing around cover) whenever far or without a clear shot;
+        // only strafe when we actually have a line on the target at mid-range.
+        if (best > 6 || !canSee) { this.stepBot(r, bot, ang, dt); moving = 1; }
+        else { this.stepBot(r, bot, ang + Math.PI / 2 * (bot.id % 2 ? 1 : -1), dt * 0.6); moving = 0.6; }
+        if (canSee && now >= bot.nextShot) {
           bot.nextShot = now + w.rate / bot.skill + Math.random() * 260;
           const dir = { x: -Math.sin(ang), y: 0.02, z: -Math.cos(ang) };
           const from = { x: bot.pos.x, y: bot.pos.y + 1.5, z: bot.pos.z };
@@ -813,6 +875,11 @@ export class GameServer extends DurableObject {
             const head = Math.random() < 0.12;
             this.applyDamage(r, target, Math.round(w.dmg * (head ? 2 : 1)), bot, head, 'rifle');
           }
+        } else if (best < 2.6 && now >= bot.nextShot) {
+          // Point-blank with no clean shot (piled on the same cover): swing melee
+          // so fights resolve instead of stalling.
+          bot.nextShot = now + 650;
+          this.applyDamage(r, target, 20, bot, false, 'pickaxe');
         }
       } else if (r.mode === 'dom' && Math.hypot(bot.pos.x - ZONE_CX, bot.pos.z - ZONE_CZ) > 5) {
         // Domination: with no enemy in sight, march on the central hill to contest it.
@@ -875,6 +942,7 @@ export class GameServer extends DurableObject {
         }
         this.updateFlags(r, now);
         this.updateZone(r, dt);
+        this.updateWaves(r, now);
         this.updatePickups(r, now);
         const states = [];
         for (const e of this.entities(r)) { if (!e.alive) continue; states.push({ id: e.id, pos: e.pos, ry: e.ry, rx: e.rx, anim: e.anim, hp: Math.round(e.hp) }); }
