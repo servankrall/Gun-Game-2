@@ -148,6 +148,11 @@ const CFG = {
   survWaves: 8,            // Survival: clear this many waves to win
   survTeammates: 3,        // Survival: friendly AI bots fighting alongside you
   survZombieCap: 8,        // Survival: max raiders alive in one wave
+  turretRange: 18,         // Sentry turret target range
+  turretDmg: 11,           // Sentry turret damage per shot
+  turretRate: 480,         // ms between turret shots
+  turretLife: 28000,       // ms a deployed turret lasts before it powers down
+  turretHp: 120,           // turret health (destructible by explosions/fire)
 };
 // Domination: a single central hill. Stand in it (with no enemy present) to
 // capture it, then hold it to bank points over time.
@@ -361,7 +366,7 @@ export class GameServer extends DurableObject {
     let r = this.rooms.get(id);
     if (!r) {
       const map = randomMap(); // maps are random, not player-chosen
-      r = { id, clients: new Map(), bots: new Map(), scores: { red: 0, blue: 0 }, placed: new Map(), destroyed: new Map(), over: false, mode: 'dm', flags: null, map, ...buildRoomMap(map) };
+      r = { id, clients: new Map(), bots: new Map(), turrets: new Map(), scores: { red: 0, blue: 0 }, placed: new Map(), destroyed: new Map(), over: false, mode: 'dm', flags: null, map, ...buildRoomMap(map) };
       r.pickups = makePickups(r);
       this.rooms.set(id, r);
     }
@@ -471,6 +476,7 @@ export class GameServer extends DurableObject {
       flags: r.flags ? this.flagPub(r) : undefined,
       zone: r.mode === 'dom' && r.zone ? this.zonePub(r) : undefined,
       wave: r.mode === 'surv' ? r.wave : undefined,
+      turrets: [...r.turrets.values()].map(t => ({ id: t.id, owner: t.owner, team: t.team, pos: t.pos, ry: t.ry })),
       pickups: r.pickups.map(p => ({ x: p.x, y: p.y, z: p.z, active: p.active, type: p.type })),
       players: this.entities(r).filter(e => e.id !== id).map(e => this.pub(e)),
       placed: [...r.placed.values()], destroyed: [...r.destroyed.values()],
@@ -522,6 +528,7 @@ export class GameServer extends DurableObject {
         this.broadcastExcept(r, id, { t: 'nade', from: m.from, vel: m.vel });
         break;
       }
+      case 'deploy': this.deployTurret(r, p, m); break;
       case 'respawn':
         p.alive = true; p.hp = 100; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); p.rx = 0;
         this.broadcast(r, { t: 'respawn', id: p.id, pos: p.pos });
@@ -639,6 +646,42 @@ export class GameServer extends DurableObject {
       for (let i = 0; i < count; i++) this.addBot(r, 'blue', { zombie: true, tier: Math.random() < 0.3 ? 'hard' : base });
       r.waveState = 'active';
       this.broadcast(r, { t: 'wave', ev: 'start', wave: r.wave, enemies: count });
+    }
+  }
+  // Deploy a sentry turret at the owner's feet (one per owner — redeploying
+  // replaces the old one). It auto-fires at nearby enemies until it expires.
+  deployTurret(r, owner, m) {
+    if (r.over || !owner.alive) return;
+    for (const [tid, t] of r.turrets) if (t.owner === owner.id) { this.broadcast(r, { t: 'turretgone', id: tid }); r.turrets.delete(tid); }
+    const id = this.nextId++;
+    const pos = { x: owner.pos.x, y: owner.pos.y, z: owner.pos.z };
+    const turret = { id, owner: owner.id, team: owner.team, pos, ry: +m.ry || 0, hp: CFG.turretHp, nextShot: 0, expiresAt: Date.now() + CFG.turretLife };
+    r.turrets.set(id, turret);
+    this.broadcast(r, { t: 'turret', id, owner: owner.id, team: owner.team, pos, ry: turret.ry });
+  }
+  // Run every deployed turret: expire old ones, else shoot the nearest visible
+  // enemy in range (damage/kills credited to the turret's owner).
+  updateTurrets(r, now) {
+    if (!r.turrets || r.turrets.size === 0) return;
+    for (const [tid, t] of r.turrets) {
+      if (r.over || now >= t.expiresAt) { this.broadcast(r, { t: 'turretgone', id: tid }); r.turrets.delete(tid); continue; }
+      if (now < t.nextShot) continue;
+      let target = null, best = Infinity;
+      for (const e of this.entities(r)) {
+        if (!e.alive || e.team === t.team) continue;
+        const d = Math.hypot(e.pos.x - t.pos.x, e.pos.z - t.pos.z);
+        if (d < best) { best = d; target = e; }
+      }
+      if (!target || best > CFG.turretRange) continue;
+      if (!losClear(r, t.pos.x, t.pos.y + 0.8, t.pos.z, target.pos.x, target.pos.y + 1.0, target.pos.z)) continue;
+      t.nextShot = now + CFG.turretRate;
+      const ang = Math.atan2(-(target.pos.x - t.pos.x), -(target.pos.z - t.pos.z));
+      t.ry = ang;
+      const dir = { x: -Math.sin(ang), y: 0.02, z: -Math.cos(ang) };
+      const from = { x: t.pos.x, y: t.pos.y + 0.8, z: t.pos.z };
+      this.broadcast(r, { t: 'shoot', id: tid, from, dir, w: 'smg', turret: true });
+      const owner = r.clients.get(t.owner)?.player || { id: t.owner, team: t.team, pos: t.pos, kills: 0, streak: 0 };
+      this.applyDamage(r, target, CFG.turretDmg, owner, false, 'turret');
     }
   }
   // Tick the central hill: capture when one team holds it alone, then bank points.
@@ -764,6 +807,8 @@ export class GameServer extends DurableObject {
     r.over = false;
     r.scores = { red: 0, blue: 0 };
     r.placed.clear(); r.destroyed.clear();
+    for (const [tid] of r.turrets) this.broadcast(r, { t: 'turretgone', id: tid });
+    r.turrets.clear();
     if (r.mode === 'dom') r.zone = { owner: null, cap: 0, capTeam: null, accum: 0, contested: false };
     if (r.mode === 'surv') {
       for (const b of [...r.bots.values()]) if (b.zombie) this.removeBot(r, b.id); // clear leftover raiders
@@ -781,6 +826,7 @@ export class GameServer extends DurableObject {
     const r = this.rooms.get(roomId); if (!r) return;
     if (!r.clients.has(id)) return;
     if (r.mode === 'ctf' && r.flags) this.dropFlagIfCarrier(r, r.clients.get(id).player);
+    for (const [tid, t] of r.turrets) if (t.owner === id) { this.broadcast(r, { t: 'turretgone', id: tid }); r.turrets.delete(tid); }
     r.clients.delete(id);
     this.broadcast(r, { t: 'leave', id });
     this.balanceBots(r);
@@ -943,6 +989,7 @@ export class GameServer extends DurableObject {
         this.updateFlags(r, now);
         this.updateZone(r, dt);
         this.updateWaves(r, now);
+        this.updateTurrets(r, now);
         this.updatePickups(r, now);
         const states = [];
         for (const e of this.entities(r)) { if (!e.alive) continue; states.push({ id: e.id, pos: e.pos, ry: e.ry, rx: e.rx, anim: e.anim, hp: Math.round(e.hp) }); }

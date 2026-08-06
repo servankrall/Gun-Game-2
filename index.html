@@ -357,6 +357,8 @@
   #matchTimer { position: absolute; top: 150px; left: 40px; font-size: 11px; color: #cfd6e6; text-shadow: 1px 1px 0 #000; font-variant-numeric: tabular-nums; }
   #streakHud { position: absolute; top: 170px; left: 40px; font-size: 11px; color: #ffb14a; text-shadow: 1px 1px 0 #000; display: none; }
   #shieldHud { position: absolute; top: 188px; left: 40px; font-size: 11px; color: #5ad1ff; text-shadow: 1px 1px 0 #000; display: none; padding: 1px 5px; border: 1px solid #5ad1ff88; border-radius: 3px; background: rgba(20,60,90,0.35); }
+  #turretHud { position: absolute; top: 208px; left: 40px; font-size: 11px; color: #cfd6e6; text-shadow: 1px 1px 0 #000; display: none; }
+  #turretHud .coin { width: 9px; height: 9px; vertical-align: -1px; }
   #zoneHud { position: absolute; top: 84px; left: 50%; transform: translateX(-50%); text-align: center; display: none; z-index: 4; }
   #zoneHud #zoneTxt { font-size: 11px; letter-spacing: 1px; color: #cfd6e6; text-shadow: 1px 1px 0 #000; }
   #zoneBarWrap { width: 180px; height: 6px; margin: 4px auto 0; background: rgba(0,0,0,0.5); border: 1px solid #000; }
@@ -525,6 +527,7 @@
     <div id="matchTimer">00:00</div>
     <div id="streakHud"></div>
     <div id="shieldHud"></div>
+    <div id="turretHud"></div>
     <div id="zoneHud"><span id="zoneTxt"></span><div id="zoneBarWrap"><div id="zoneBar"></div></div></div>
     <div id="waveHud"></div>
     <div id="announce"></div>

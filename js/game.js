@@ -707,6 +707,7 @@ function leaveGame() {
   try { document.exitPointerLock(); } catch {}
   hideMatchOver();
   hideZone();
+  clearTurrets();
   { const wh = $('waveHud'); if (wh) wh.style.display = 'none'; const st = $('scoreTop'); if (st) st.style.display = ''; }
   const ph = $('pauseHint'); if (ph) ph.style.display = 'none';
   if (ws && (ws.readyState === 0 || ws.readyState === 1)) { try { ws.close(); } catch {} } // onclose returns to the menu
@@ -771,6 +772,7 @@ function handleMsg(m) {
       for (const b of m.placed) placeBlockLocal(b.x, b.y, b.z, b.team);
       if (gameMode === 'ctf') { ensureFlags(); if (m.flags) updateFlagMeshes(m.flags); }
       if (gameMode === 'dom') { ensureZone(); if (m.zone) updateZoneState(m.zone); } else hideZone();
+      clearTurrets(); if (m.turrets) for (const t of m.turrets) addTurret(t);
       if (gameMode === 'surv') { waveNum = m.wave || 0; }
       if (gameMode === 'gg') { myLevel = 0; }
       startGame();
@@ -857,8 +859,12 @@ function handleMsg(m) {
         SND.shot(m.w, Math.max(0.02, 0.25 * Math.min(1, 14 / (dist + 1))));
       }
       if (r) r.shootAnim = 0.12;
+      const tm = m.turret && turretMeshes.get(m.id);
+      if (tm) tm.userData.head.rotation.y = Math.atan2(-m.dir.x, -m.dir.z);
       break;
     }
+    case 'turret': addTurret(m); break;
+    case 'turretgone': removeTurret(m.id); break;
     case 'hp': {
       me.hp = m.hp;
       updateHearts();
@@ -897,7 +903,7 @@ function handleMsg(m) {
       const vTeam = victim ? victim.team : myTeam;
       const kName = killer ? killer.name : myName;
       const kTeam = killer ? killer.team : myTeam;
-      const WLABEL = { rifle: 'RIFLE', smg: 'SMG', shotgun: 'SHOTGUN', sniper: 'SNIPER', lmg: 'LMG', pistol: 'PISTOL', bazooka: 'ROCKET', pickaxe: 'MELEE' };
+      const WLABEL = { rifle: 'RIFLE', smg: 'SMG', shotgun: 'SHOTGUN', sniper: 'SNIPER', lmg: 'LMG', pistol: 'PISTOL', bazooka: 'ROCKET', pickaxe: 'MELEE', turret: 'TURRET' };
       const wl = WLABEL[m.w] || 'RIFLE';
       feed(`${kName} [${wl}]${m.head ? ' HS' : ''} ► ${vName}`, kTeam, vTeam);
       // First blood: the first genuine kill of the match gets a shout-out.
@@ -1013,7 +1019,7 @@ function handleMsg(m) {
       hideMatchOver();
       resetWorld();
       if (gameMode === 'gg') { myLevel = 0; applyGunGameWeapon(); }
-      waveNum = 0;
+      waveNum = 0; clearTurrets();
       feed(gameMode === 'ctf' ? `New match — capture ${scoreLimit} flags to win!`
          : gameMode === 'gg' ? `New match — work through all ${scoreLimit} weapons to win!`
          : gameMode === 'dom' ? `New match — hold the zone to ${scoreLimit} points!`
@@ -1464,6 +1470,54 @@ function updateZoneHud(z) {
   if (bar) { bar.style.width = Math.round(Math.max(0, Math.min(1, frac)) * 100) + '%'; bar.style.background = col; }
 }
 function hideZone() { if (zoneMesh) zoneMesh.visible = false; zoneState = null; const h = $('zoneHud'); if (h) h.style.display = 'none'; }
+
+// ============================================================
+// Sentry turrets (deployable, coin-cost ability — key B)
+// ============================================================
+const turretMeshes = new Map();
+const TURRET_COST = 75;
+let turretCdUntil = 0;
+function makeTurretMesh(team, ry) {
+  const col = team === 'red' ? 0xd83a34 : 0x3a5bd8;
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.3, 0.7), new THREE.MeshLambertMaterial({ color: 0x2b2f38 }));
+  base.position.y = 0.15;
+  const post = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.5, 0.22), new THREE.MeshLambertMaterial({ color: 0x4a4f5a }));
+  post.position.y = 0.55;
+  const head = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.6), new THREE.MeshLambertMaterial({ color: col }));
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.7), new THREE.MeshLambertMaterial({ color: 0x1c1f26 }));
+  barrel.position.set(0, 0, -0.55);
+  const eye = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.05), new THREE.MeshBasicMaterial({ color: 0xffdd55 }));
+  eye.position.set(0, 0.06, -0.31);
+  head.add(body, barrel, eye); head.position.y = 0.98;
+  [base, post].forEach(o => o.castShadow = true);
+  g.add(base, post, head);
+  g.userData = { head };
+  g.rotation.y = ry || 0;
+  scene.add(g);
+  return g;
+}
+function addTurret(m) {
+  if (turretMeshes.has(m.id)) return;
+  const g = makeTurretMesh(m.team, m.ry);
+  g.position.set(m.pos.x, m.pos.y - 0.1, m.pos.z); // owner feet ~ground+1.1; drop to the ground surface
+  turretMeshes.set(m.id, g);
+  feed(m.owner === myId ? 'Your sentry turret is online!' : 'An enemy turret deployed', m.team);
+  SND.spawn();
+}
+function removeTurret(id) { const g = turretMeshes.get(id); if (g) { scene.remove(g); turretMeshes.delete(id); } }
+function clearTurrets() { for (const id of [...turretMeshes.keys()]) removeTurret(id); }
+function deployTurret() {
+  if (!inGame || me.dead) return;
+  const now = performance.now();
+  if (now < turretCdUntil) { feed(`Turret recharging (${Math.ceil((turretCdUntil - now) / 1000)}s)`, myTeam); return; }
+  if (coins < TURRET_COST) { feed(`Need ${TURRET_COST} coins to deploy a turret`, myTeam); return; }
+  awardCoins(-TURRET_COST);
+  turretCdUntil = now + 18000;
+  netSend({ t: 'deploy', pos: { x: me.pos.x, y: me.pos.y, z: me.pos.z }, ry: me.ry });
+  announce('TURRET DEPLOYED', '#7dd3fc');
+}
 
 // ============================================================
 // Remote players (blocky characters)
@@ -2472,6 +2526,7 @@ function setupInput() {
     if (e.code === 'Tab') { e.preventDefault(); tabHeld = true; updateScoreboard(); }
     if (e.code === 'KeyR') startReload();
     if (e.code === 'KeyG' && !e.repeat) throwGrenade();
+    if (e.code === 'KeyB' && !e.repeat) deployTurret();
     if (/^Digit[1-9]$/.test(e.code)) {
       const n = parseInt(e.code[5]) - 1;
       if (gameMode === 'gg') { const v = [ggWeaponKey(), 'blocks']; if (n < v.length) selectSlot(SLOTS.indexOf(v[n])); }
@@ -2706,6 +2761,13 @@ function updateBuffHud(now) {
     const rem = me.shieldUntil - now;
     if (rem > 0 && !me.dead) { bh.style.display = 'block'; bh.textContent = 'SHIELD ' + Math.ceil(rem / 1000) + 's'; }
     else bh.style.display = 'none';
+  }
+  const th = $('turretHud');
+  if (th) {
+    const rem = turretCdUntil - now;
+    th.style.display = 'block';
+    if (rem > 0) { th.innerHTML = `TURRET <span style="color:#888">${Math.ceil(rem / 1000)}s</span>`; th.style.opacity = '0.6'; }
+    else { th.innerHTML = `TURRET <span style="color:#888">[B]</span> ${TURRET_COST}${COIN}`; th.style.opacity = coins >= TURRET_COST ? '1' : '0.5'; }
   }
 }
 // Survival: show the wave counter + raiders remaining (in place of team score).
