@@ -198,6 +198,27 @@ ownedSkins.add('standard');
 let equippedSkin = localStorage.getItem('bf_skin') || 'standard';
 function saveSkins() { localStorage.setItem('bf_skins', JSON.stringify([...ownedSkins])); localStorage.setItem('bf_skin', equippedSkin); }
 function skinUnlocked(id) { const s = SKINS[id]; if (!s) return false; if (ownedSkins.has(id)) return true; return s.tier > 0 && careerLevel() >= s.tier; }
+
+// Character (agent) skins — outfits that recolour helmet/pants and can glow.
+// The team jersey stays team-coloured so red/blue is always readable.
+const CHAR_SKINS = {
+  default: { name: 'DEFAULT', accent: null, pants: 0x33343c, glow: false, tier: 0, cost: 0 },
+  cadet:   { name: 'CADET', accent: 0x4a6299, pants: 0x2b3550, glow: false, tier: 4, cost: 0 },
+  ranger:  { name: 'RANGER', accent: 0x5a7a2a, pants: 0x223018, glow: false, tier: 10, cost: 0 },
+  radiant: { name: 'RADIANT', accent: 0xffe08a, pants: 0x4a4020, glow: true, tier: 30, cost: 0 },
+  shadow:  { name: 'SHADOW OPS', accent: 0x2a2a30, pants: 0x111114, glow: false, tier: 0, cost: 700 },
+  frost:   { name: 'FROSTBITE', accent: 0x9fe0ff, pants: 0x25414f, glow: false, tier: 0, cost: 900 },
+  ember:   { name: 'EMBER', accent: 0xff7a1a, pants: 0x3a1a06, glow: true, tier: 0, cost: 1200 },
+  neon:    { name: 'NEON RONIN', accent: 0xff4fd8, pants: 0x2a0a2a, glow: true, tier: 0, cost: 1600 },
+  voidwlk: { name: 'VOIDWALKER', accent: 0x8a4bff, pants: 0x1a1030, glow: true, tier: 0, cost: 2000 },
+  golden:  { name: 'GOLD PLATE', accent: 0xffd24a, pants: 0x3a3010, glow: true, tier: 0, cost: 2800 },
+};
+let ownedChars = (() => { try { const a = JSON.parse(localStorage.getItem('bf_chars')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
+ownedChars.add('default');
+let equippedChar = localStorage.getItem('bf_char') || 'default';
+function saveChars() { localStorage.setItem('bf_chars', JSON.stringify([...ownedChars])); localStorage.setItem('bf_char', equippedChar); }
+function charUnlocked(id) { const s = CHAR_SKINS[id]; if (!s) return false; if (ownedChars.has(id)) return true; return s.tier > 0 && careerLevel() >= s.tier; }
+
 // Tracer colour comes from the equipped skin (bundled).
 function myTracerColor(wkey) {
   const s = SKINS[equippedSkin];
@@ -337,7 +358,7 @@ function renderShop() {
     box.querySelectorAll('[data-equip]').forEach(b => b.addEventListener('click', () => equipTitle(b.dataset.equip)));
     box.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => buyTitle(b.dataset.buy)));
     const none = $('shopUnequip'); if (none) { none.style.display = ''; none.onclick = () => equipTitle('none'); }
-  } else { // weapon skins
+  } else if (shopCat === 'skins') { // weapon skins
     const none = $('shopUnequip'); if (none) none.style.display = 'none';
     if (stage) stage.style.display = 'flex';
     if (!SKINS[selectedSkin]) selectedSkin = equippedSkin;
@@ -354,7 +375,54 @@ function renderShop() {
     }
     box.innerHTML = h;
     box.querySelectorAll('[data-sel]').forEach(c => c.addEventListener('click', () => { selectedSkin = c.dataset.sel; renderShop(); }));
+  } else { // character skins
+    const none = $('shopUnequip'); if (none) none.style.display = 'none';
+    if (stage) stage.style.display = 'flex';
+    if (!CHAR_SKINS[selectedChar]) selectedChar = equippedChar;
+    setPreviewChar(selectedChar); startPreview();
+    renderCharInfo();
+    for (const id in CHAR_SKINS) {
+      const s = CHAR_SKINS[id], owned = charUnlocked(id), equipped = equippedChar === id, sel = selectedChar === id, rar = charRarity(id);
+      const accSw = s.accent != null ? hx(s.accent) : '#9aa4b2';
+      h += `<div class="skin-card ${owned ? 'owned' : ''} ${equipped ? 'equipped' : ''} ${sel ? 'sel' : ''}" data-selc="${id}" style="border-top:3px solid ${rar.color}">
+        <div class="skin-sw"><span style="background:${accSw}"></span><span style="background:${hx(s.pants)}"></span>${s.glow ? `<span class="tr" style="background:${accSw}"></span>` : ''}</div>
+        <div class="skin-nm">${s.name}</div>
+        <div class="shop-src" style="color:${rar.color}">${rar.name}</div>
+        <div class="shop-src">${s.tier > 0 ? 'Career Lv ' + s.tier : id === 'default' ? 'Default' : COIN + s.cost}</div>
+      </div>`;
+    }
+    box.innerHTML = h;
+    box.querySelectorAll('[data-selc]').forEach(c => c.addEventListener('click', () => { selectedChar = c.dataset.selc; renderShop(); }));
   }
+}
+let selectedChar = equippedChar;
+function charRarity(id) {
+  const s = CHAR_SKINS[id]; if (!s) return { name: 'RARE', color: '#5ad1ff' };
+  if (id === 'default') return { name: 'STANDARD', color: '#9fb0d0' };
+  if (s.tier > 0) return { name: 'CAREER', color: '#7be0a0' };
+  if (s.cost >= 2000) return { name: 'LEGENDARY', color: '#ffd24a' };
+  if (s.cost >= 1200) return { name: 'EPIC', color: '#c78bff' };
+  return { name: 'RARE', color: '#5ad1ff' };
+}
+function renderCharInfo() {
+  const info = $('skinInfo'); if (!info) return;
+  const s = CHAR_SKINS[selectedChar], owned = charUnlocked(selectedChar), equipped = equippedChar === selectedChar, rar = charRarity(selectedChar);
+  const glow = s.glow ? '<span class="si-tag">GLOW</span>' : '';
+  info.innerHTML = `<div class="si-rar" style="color:${rar.color};border-color:${rar.color}">${rar.name}</div>
+    <div class="si-name">${s.name}</div>
+    <div class="si-src">${s.tier > 0 ? 'Career reward · Level ' + s.tier : selectedChar === 'default' ? 'Default outfit' : 'Shop exclusive'}</div>
+    <div class="si-tr">OUTFIT${glow}</div>
+    <div class="si-hint">Others see your outfit in-game</div>
+    <div class="si-act">${actionBtn(owned, equipped, s.tier, s.cost, selectedChar)}</div>`;
+  info.querySelectorAll('[data-equip]').forEach(b => b.addEventListener('click', () => equipChar(b.dataset.equip)));
+  info.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => buyChar(b.dataset.buy)));
+}
+function equipChar(id) { if (!charUnlocked(id)) return; equippedChar = id; selectedChar = id; saveChars(); renderShop(); }
+function buyChar(id) {
+  const s = CHAR_SKINS[id]; if (!s || charUnlocked(id)) return;
+  if (coins < s.cost) { const m = $('shopMsg'); if (m) m.textContent = `Need ${s.cost} coins`; return; }
+  awardCoins(-s.cost); ownedChars.add(id); saveChars(); equipChar(id);
+  const m = $('shopMsg'); if (m) m.textContent = `Unlocked ${s.name}!`;
 }
 function skinRarity(id) {
   const s = SKINS[id]; if (!s) return { name: 'RARE', color: '#5ad1ff' };
@@ -426,19 +494,37 @@ function ensureSkinPreview() {
   pv = { renderer, scene, cam, holder, gun: null, raf: 0, skin: null };
   return pv;
 }
-function setPreviewSkin(id) {
-  const p = ensureSkinPreview(); if (!p) return;
-  if (p.skin === id && p.gun) return;
-  if (p.gun) { p.holder.remove(p.gun); p.gun.traverse(o => { o.geometry && o.geometry.dispose(); o.material && o.material.dispose(); }); }
-  p.gun = makePreviewGun(id); p.holder.add(p.gun); p.skin = id;
+function makePreviewChar(id) {
+  const s = CHAR_SKINS[id] || CHAR_SKINS.default;
+  const acc = s.accent != null ? s.accent : 0x9aa4b2, pantsC = s.pants != null ? s.pants : 0x33343c;
+  const M = (c, glow) => new THREE.MeshStandardMaterial({ color: c, emissive: glow ? c : 0x000000, emissiveIntensity: glow ? 0.6 : 0, metalness: 0.25, roughness: 0.7 });
+  const g = new THREE.Group();
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), M(0xd8a37a)); head.position.y = 1.65;
+  const helmet = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.2, 0.58), M(acc, s.glow)); helmet.position.y = 1.92;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.28), M(0x8f3a38)); body.position.y = 1.05;
+  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.62, 0.24), M(0x8f3a38)); armL.position.set(-0.37, 1.07, 0);
+  const armR = armL.clone(); armR.position.x = 0.37;
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.7, 0.26), M(pantsC)); legL.position.set(-0.13, 0.35, 0);
+  const legR = legL.clone(); legR.position.x = 0.13;
+  g.add(head, helmet, body, armL, armR, legL, legR);
+  g.scale.set(1.05, 1.05, 1.05); g.position.y = -1.05; g.rotation.y = -0.35;
+  return g;
 }
+function setPreviewObj(obj, key, glow) {
+  const p = ensureSkinPreview(); if (!p) return;
+  if (p.skin === key && p.gun) return;
+  if (p.gun) { p.holder.remove(p.gun); p.gun.traverse(o => { o.geometry && o.geometry.dispose(); if (o.material) (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); }); }
+  p.gun = obj; p.holder.add(obj); p.skin = key; p.glow = !!glow;
+}
+function setPreviewSkin(id) { setPreviewObj(makePreviewGun(id), 'gun:' + id, GLOW_SKINS.has(id)); }
+function setPreviewChar(id) { setPreviewObj(makePreviewChar(id), 'char:' + id, !!(CHAR_SKINS[id] && CHAR_SKINS[id].glow)); }
 function previewLoop() {
   if (!pv) return;
   pv.raf = requestAnimationFrame(previewLoop);
   if (pv.holder) pv.holder.rotation.y += 0.012;
-  if (pv.gun && GLOW_SKINS.has(pv.skin)) {
+  if (pv.gun && pv.glow) {
     const gi = 0.8 + Math.sin(performance.now() * 0.006) * 0.7;
-    pv.gun.traverse(o => { if (o.material) o.material.emissiveIntensity = gi; });
+    pv.gun.traverse(o => { if (o.material && o.material.emissive && o.material.emissiveIntensity !== undefined && o.material.emissive.getHex() !== 0) o.material.emissiveIntensity = gi; });
   }
   pv.renderer.render(pv.scene, pv.cam);
 }
@@ -1053,7 +1139,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId(), acct: account ? account.user : null, color: (typeof myColor === 'number' ? myColor : undefined), title: titleText(equippedTitle) }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId(), acct: account ? account.user : null, color: (typeof myColor === 'number' ? myColor : undefined), title: titleText(equippedTitle), charSkin: equippedChar }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -1897,12 +1983,13 @@ function makeNameSprite(name, team, tier, title) {
   return sp;
 }
 
-function makeCharacter(team, name, agentId, color, tier, title) {
+function makeCharacter(team, name, agentId, color, tier, title, charSkin) {
   const group = new THREE.Group();
-  const accentCol = (typeof color === 'number' && color >= 0) ? color : (AGENTS[agentId]?.accent ?? 0x9aa4b2);
+  const cs = CHAR_SKINS[charSkin] || CHAR_SKINS.default;
+  const accentCol = (cs.accent != null) ? cs.accent : ((typeof color === 'number' && color >= 0) ? color : (AGENTS[agentId]?.accent ?? 0x9aa4b2));
   const skin = new THREE.MeshLambertMaterial({ color: 0xd8a37a });
   const jersey = new THREE.MeshLambertMaterial({ color: team === 'red' ? 0xb03430 : 0x3a4fb4 });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x33343c });
+  const pants = new THREE.MeshLambertMaterial({ color: cs.pants != null ? cs.pants : 0x33343c });
   const faceMat = new THREE.MeshLambertMaterial({ map: faceTex });
 
   // head (face on -Z)
@@ -1929,8 +2016,10 @@ function makeCharacter(team, name, agentId, color, tier, title) {
   legL.geometry.translate(0, -0.35, 0); legR.geometry.translate(0, -0.35, 0);
   legL.position.set(-0.13, 0.7, 0); legR.position.set(0.13, 0.7, 0);
 
-  // agent accent: helmet on top of the head
-  const helmet = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.18, 0.56), new THREE.MeshLambertMaterial({ color: accentCol }));
+  // agent accent: helmet on top of the head (character skins can make it glow)
+  const helmetMat = new THREE.MeshLambertMaterial({ color: accentCol });
+  if (cs.glow && helmetMat.emissive) { helmetMat.emissive.setHex(accentCol); helmetMat.emissiveIntensity = 0.6; }
+  const helmet = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.18, 0.56), helmetMat);
   helmet.position.y = 1.92;
 
   [head, body, armL, armR, legL, legR, gun, helmet].forEach(o => { o.castShadow = true; group.add(o); });
@@ -1942,7 +2031,7 @@ function makeCharacter(team, name, agentId, color, tier, title) {
 
 function addRemote(p) {
   if (remotes.has(p.id)) return;
-  const group = makeCharacter(p.team, p.name, p.agent, p.color, p.rankTier, p.title);
+  const group = makeCharacter(p.team, p.name, p.agent, p.color, p.rankTier, p.title, p.charSkin);
   group.position.set(p.pos.x, p.pos.y, p.pos.z);
   group.rotation.y = p.ry + Math.PI;
   group.visible = p.alive;
