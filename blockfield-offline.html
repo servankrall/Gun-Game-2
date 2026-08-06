@@ -2269,6 +2269,8 @@ const SKIN_PATTERN = {
   prime: 'plain', neofrontier: 'circuit', kuronami: 'wave', sovereign: 'gold', oni: 'scale',
   glitchpop: 'glitch', dragon: 'scale',
 };
+// Premium skins pulse an animated glow in-game and in the preview.
+const GLOW_SKINS = new Set(['chronovoid', 'radiant', 'neofrontier', 'oni', 'glitchpop', 'dragon']);
 const _skinTexCache = {};
 function makeSkinTexture(id) {
   if (_skinTexCache[id]) return _skinTexCache[id];
@@ -2311,6 +2313,7 @@ function applyWeaponSkin(id) {
     const m = vm.mats[key]; if (!m) continue;
     m.color.setHex(tex ? 0xffffff : col); // map multiplies colour, so go white under a texture
     if (m.emissive) m.emissive.setHex(s.emissive);
+    m.emissiveIntensity = 1; // reset; pulsed per-frame only for glow skins
     m.map = tex; m.needsUpdate = true;
   }
 }
@@ -2478,6 +2481,10 @@ function previewLoop() {
   if (!pv) return;
   pv.raf = requestAnimationFrame(previewLoop);
   if (pv.holder) pv.holder.rotation.y += 0.012;
+  if (pv.gun && GLOW_SKINS.has(pv.skin)) {
+    const gi = 0.8 + Math.sin(performance.now() * 0.006) * 0.7;
+    pv.gun.traverse(o => { if (o.material) o.material.emissiveIntensity = gi; });
+  }
   pv.renderer.render(pv.scene, pv.cam);
 }
 function startPreview() { if (pv && !pv.raf) previewLoop(); }
@@ -3301,6 +3308,8 @@ function handleMsg(m) {
       }
       if (m.killer === myId && m.victim !== myId) {
         me.kills++; matchKills++; SND.kill(); onMyKill();
+        // skin-tinted kill burst at the victim
+        if (victim) { const kp = victim.group.position.clone(); kp.y += 1.0; burst(kp, myTracerColor(SLOTS[me.slot]), 26, 6); }
         if (lastKilledBy && m.victim === lastKilledBy) { // paid them back
           announce('REVENGE!', '#ffd24a'); awardCoins(15); unlockAch('revenge'); lastKilledBy = null;
         }
@@ -4145,6 +4154,7 @@ function tryShoot(now) {
     netSend({ t: 'shoot', from: { x: origin.x, y: origin.y, z: origin.z }, dir: { x: baseDir.x, y: baseDir.y, z: baseDir.z }, w: wkey });
     me.rx += 0.06;
     vm.recoil = 1;
+    if (vm.muzzle) { vm.flash = 1.2; vm.muzzle.material.color.setHex(0xff8a3a); }
     startReload();
     return;
   }
@@ -4183,9 +4193,10 @@ function tryShoot(now) {
 
   SND.shot(wkey);
   netSend({ t: 'shoot', from: { x: origin.x, y: origin.y, z: origin.z }, dir: { x: baseDir.x, y: baseDir.y, z: baseDir.z }, w: wkey, tc: tcol });
-  // recoil
+  // recoil + skin-tinted muzzle flash
   me.rx += w.pellets > 1 ? 0.03 : (wkey === 'sniper' ? 0.04 : 0.012);
   vm.recoil = 1;
+  if (vm.muzzle) { vm.flash = 1; vm.muzzle.material.color.setHex(tcol); }
   if (me.ammo[wkey] <= 0) startReload();
 }
 
@@ -4645,6 +4656,11 @@ function buildViewModels() {
   }
   for (const m of Object.values(vm.models)) { vm.group.add(m); m.visible = false; }
   vm.models[SLOTS[me.slot]].visible = true;
+  // muzzle flash (tinted by the equipped skin's tracer colour on each shot)
+  const muzzle = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.3),
+    new THREE.MeshBasicMaterial({ color: 0xffd080, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+  muzzle.position.set(0, 0.0, -0.62);
+  vm.group.add(muzzle); vm.muzzle = muzzle; vm.flash = 0;
   applyWeaponSkin(equippedSkin); // paint the guns with the player's equipped skin
 }
 
@@ -4659,6 +4675,19 @@ function updateViewModel(dt, moving) {
   vm.group.position.z = -0.55 + vm.recoil * 0.09;
   vm.group.rotation.x = vm.recoil * 0.14;
   vm.group.visible = !me.dead && !(me.zoomed && SLOTS[me.slot] === 'sniper');
+  // muzzle flash fade
+  if (vm.muzzle) {
+    vm.flash = Math.max(0, vm.flash - dt * 11);
+    vm.muzzle.material.opacity = vm.flash * 0.9;
+    const sc = 0.5 + vm.flash * 1.1; vm.muzzle.scale.set(sc, sc, sc);
+    vm.muzzle.rotation.z += dt * 10;
+    vm.muzzle.visible = vm.flash > 0.01;
+  }
+  // animated glow pulse for premium skins
+  if (vm.mats && GLOW_SKINS.has(equippedSkin)) {
+    const gi = 0.7 + Math.sin(performance.now() * 0.006) * 0.5;
+    vm.mats.dark.emissiveIntensity = gi; vm.mats.dark2.emissiveIntensity = gi; vm.mats.wood.emissiveIntensity = gi;
+  }
 }
 
 function selectSlot(i) {
