@@ -503,7 +503,7 @@ export class GameServer extends DurableObject {
         p.ry = +m.ry; p.rx = +m.rx; p.anim = +m.anim || 0;
         break;
       case 'shoot':
-        this.broadcastExcept(r, id, { t: 'shoot', id, from: m.from, dir: m.dir, w: m.w });
+        this.broadcastExcept(r, id, { t: 'shoot', id, from: m.from, dir: m.dir, w: m.w, tc: (typeof m.tc === 'number' ? (m.tc & 0xffffff) : undefined) });
         break;
       case 'hit': {
         const tgt = this.find(r, m.target);

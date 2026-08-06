@@ -495,6 +495,25 @@
   .shop-b.lock { background: #33425f; color: #9fb0d0; cursor: default; border-color: #22314c; }
   .shop-b:disabled { cursor: default; }
   .shop-b .coin { width: 10px; height: 10px; }
+
+  /* shop category tabs + tracer swatch + title badge */
+  #shopTabs { display: flex; gap: 8px; justify-content: center; }
+  .shopcat { font-family: inherit; font-size: 9px; letter-spacing: 1px; padding: 8px 16px; border-radius: 8px; cursor: pointer;
+    color: #9fb0d0; background: rgba(255,255,255,.05); border: 1px solid #2a3a5c; transition: all .15s; }
+  .shopcat:hover { color: #fff; border-color: #4a6299; }
+  .shopcat.active { color: #0c1122; background: linear-gradient(90deg,#ffd24a,#ffb14a); border-color: #ffd24a; }
+  .shop-badge { font-size: 10px; letter-spacing: 1px; color: #0c1122; padding: 6px 10px; border-radius: 6px; }
+  .tracer-sw { width: 70%; height: 12px; border-radius: 6px; box-shadow: 0 0 12px currentColor, inset 0 0 0 1px rgba(0,0,0,.4); }
+  .shop-card.equipped { position: relative; overflow: hidden; }
+  .shop-card.equipped::after { content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%; transform: skewX(-20deg);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent); animation: shimmer 2.6s ease-in-out infinite; }
+  @keyframes shimmer { 0% { left: -60%; } 60%,100% { left: 130%; } }
+
+  /* frosted panels for the existing menus too */
+  #authPanel, #friendsPanel, #leaderPanel, #awardsPanel, #optPanel {
+    background: linear-gradient(180deg, rgba(16,28,50,.9), rgba(10,18,36,.94)); border: 1px solid #2c405f; box-shadow: 0 18px 60px rgba(0,0,0,.5); backdrop-filter: blur(6px); }
+  .ltitle, .atitle { text-transform: uppercase; }
+  #coinBal { transition: transform .12s; }
 </style>
 <script>(function(){try{var t=false;try{t=window.self===window.top}catch(e){t=false}if(t){var u=new URL(location.href);if(u.searchParams.has('__raw')){u.searchParams.delete('__raw');location.replace(u.pathname+u.search+u.hash)}}}catch(e){}})()</script></head>
 <body>
@@ -614,7 +633,11 @@
     </div>
 
     <div id="shopPanel">
-      <div class="ltitle">COSMETICS — TITLES <span class="asub">(shown above your name in-game)</span></div>
+      <div class="ltitle">COSMETICS <span class="asub">(equip titles &amp; tracer skins — visible in-game)</span></div>
+      <div id="shopTabs">
+        <button class="shopcat active" data-cat="titles">TITLES</button>
+        <button class="shopcat" data-cat="tracers">TRACERS</button>
+      </div>
       <div class="shoptop"><button id="shopUnequip" class="shop-b">UNEQUIP</button><span id="shopMsg" class="amsg"></span></div>
       <div id="shopGrid" class="shopgrid"></div>
     </div>
@@ -1230,7 +1253,7 @@ class GameServer {
         p.ry = +m.ry; p.rx = +m.rx; p.anim = +m.anim || 0;
         break;
       case 'shoot':
-        this.broadcastExcept(r, id, { t: 'shoot', id, from: m.from, dir: m.dir, w: m.w });
+        this.broadcastExcept(r, id, { t: 'shoot', id, from: m.from, dir: m.dir, w: m.w, tc: (typeof m.tc === 'number' ? (m.tc & 0xffffff) : undefined) });
         break;
       case 'hit': {
         const tgt = this.find(r, m.target);
@@ -2187,6 +2210,32 @@ let ownedTitles = (() => { try { const a = JSON.parse(localStorage.getItem('bf_t
 ownedTitles.add('none');
 let equippedTitle = localStorage.getItem('bf_title') || 'none';
 function saveTitles() { localStorage.setItem('bf_titles', JSON.stringify([...ownedTitles])); localStorage.setItem('bf_title', equippedTitle); }
+
+// Tracer (bullet) skins — colour your shots for everyone to see.
+const TRACERS = {
+  standard: { name: 'STANDARD', color: 0xffd080, tier: 0, cost: 0 },
+  ice:      { name: 'ICE', color: 0x9fe0ff, tier: 3, cost: 0 },
+  emerald:  { name: 'EMERALD', color: 0x6bffa0, tier: 8, cost: 0 },
+  crimson:  { name: 'CRIMSON', color: 0xff5a5a, tier: 14, cost: 0 },
+  amethyst: { name: 'AMETHYST', color: 0xb98bff, tier: 22, cost: 0 },
+  gold:     { name: 'GOLD', color: 0xffd24a, tier: 0, cost: 500 },
+  plasma:   { name: 'PLASMA', color: 0x35f0ff, tier: 0, cost: 900 },
+  neon:     { name: 'NEON PINK', color: 0xff4fd8, tier: 0, cost: 1300 },
+  voidfx:   { name: 'VOID', color: 0x8a4bff, tier: 0, cost: 2000 },
+  rainbow:  { name: 'RAINBOW', color: 0xffffff, tier: 0, cost: 3500, rainbow: true },
+};
+let ownedTracers = (() => { try { const a = JSON.parse(localStorage.getItem('bf_tracers')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
+ownedTracers.add('standard');
+let equippedTracer = localStorage.getItem('bf_tracer') || 'standard';
+function saveTracers() { localStorage.setItem('bf_tracers', JSON.stringify([...ownedTracers])); localStorage.setItem('bf_tracer', equippedTracer); }
+function tracerUnlocked(id) { const t = TRACERS[id]; if (!t) return false; if (ownedTracers.has(id)) return true; return t.tier > 0 && careerLevel() >= t.tier; }
+// Effective tracer colour for one of MY shots (rainbow cycles over time).
+function myTracerColor(wkey) {
+  const t = TRACERS[equippedTracer];
+  if (!t || equippedTracer === 'standard') return wkey === 'sniper' ? 0xaadfff : 0xffd080;
+  if (t.rainbow) { const c = new THREE.Color(); c.setHSL((performance.now() * 0.0004) % 1, 1, 0.6); return c.getHex(); }
+  return t.color;
+}
 function titleUnlocked(id) { const t = TITLES[id]; if (!t) return false; if (ownedTitles.has(id)) return true; return t.tier > 0 && careerLevel() >= t.tier; }
 function titleText(id) { const t = TITLES[id]; return (t && id !== 'none') ? t.name : ''; }
 function awardXp(n) {
@@ -2237,28 +2286,50 @@ function renderCareer() {
   // auto-scroll to current tier
   const curEl = box.querySelector('.ptier.cur'); if (curEl) curEl.scrollIntoView({ inline: 'center', block: 'nearest' });
 }
-// Cosmetics shop: buy / equip titles.
+// Cosmetics shop with two categories: titles + tracer skins.
+let shopCat = 'titles';
+function actionBtn(owned, equipped, tier, cost, id) {
+  if (equipped) return `<button class="shop-b eq" disabled>EQUIPPED</button>`;
+  if (owned) return `<button class="shop-b" data-equip="${id}">EQUIP</button>`;
+  if (tier > 0) return `<button class="shop-b lock" disabled>LEVEL ${tier}</button>`;
+  return `<button class="shop-b buy" data-buy="${id}">${COIN}${cost}</button>`;
+}
 function renderShop() {
   const box = $('shopGrid'); if (!box) return;
+  document.querySelectorAll('#shopTabs .shopcat').forEach(t => t.classList.toggle('active', t.dataset.cat === shopCat));
   let h = '';
-  for (const id in TITLES) {
-    if (id === 'none') continue;
-    const t = TITLES[id], owned = titleUnlocked(id), equipped = equippedTitle === id;
-    let action;
-    if (equipped) action = `<button class="shop-b eq" disabled>EQUIPPED</button>`;
-    else if (owned) action = `<button class="shop-b" data-equip="${id}">EQUIP</button>`;
-    else if (t.tier > 0) action = `<button class="shop-b lock" disabled>LEVEL ${t.tier}</button>`;
-    else action = `<button class="shop-b buy" data-buy="${id}">${COIN}${t.cost}</button>`;
-    h += `<div class="shop-card ${owned ? 'owned' : ''} ${equipped ? 'equipped' : ''}">
-      <div class="shop-title">${t.name}</div>
-      <div class="shop-src">${t.tier > 0 ? 'Career reward' : 'Shop exclusive'}</div>
-      ${action}
-    </div>`;
+  if (shopCat === 'titles') {
+    for (const id in TITLES) {
+      if (id === 'none') continue;
+      const t = TITLES[id], owned = titleUnlocked(id), equipped = equippedTitle === id;
+      h += `<div class="shop-card ${owned ? 'owned' : ''} ${equipped ? 'equipped' : ''}">
+        <div class="shop-badge" style="background:linear-gradient(90deg,#ffd24a,#ffb14a)">${t.name}</div>
+        <div class="shop-src">${t.tier > 0 ? 'Career reward' : 'Shop exclusive'}</div>
+        ${actionBtn(owned, equipped, t.tier, t.cost, id)}</div>`;
+    }
+  } else {
+    for (const id in TRACERS) {
+      const t = TRACERS[id], owned = tracerUnlocked(id), equipped = equippedTracer === id;
+      const swatch = t.rainbow ? 'background:linear-gradient(90deg,#ff5a5a,#ffd24a,#6bffa0,#35f0ff,#b98bff)'
+        : `background:#${t.color.toString(16).padStart(6, '0')}`;
+      h += `<div class="shop-card ${owned ? 'owned' : ''} ${equipped ? 'equipped' : ''}">
+        <div class="tracer-sw" style="${swatch}"></div>
+        <div class="shop-title">${t.name}</div>
+        <div class="shop-src">${t.tier > 0 ? 'Career reward' : id === 'standard' ? 'Default' : 'Shop exclusive'}</div>
+        ${actionBtn(owned, equipped, t.tier, t.cost, id)}</div>`;
+    }
   }
   box.innerHTML = h;
-  box.querySelectorAll('[data-equip]').forEach(b => b.addEventListener('click', () => { equipTitle(b.dataset.equip); }));
-  box.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => { buyTitle(b.dataset.buy); }));
-  const none = $('shopUnequip'); if (none) none.onclick = () => equipTitle('none');
+  box.querySelectorAll('[data-equip]').forEach(b => b.addEventListener('click', () => shopCat === 'titles' ? equipTitle(b.dataset.equip) : equipTracer(b.dataset.equip)));
+  box.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => shopCat === 'titles' ? buyTitle(b.dataset.buy) : buyTracer(b.dataset.buy)));
+  const none = $('shopUnequip'); if (none) { none.style.display = shopCat === 'titles' ? '' : 'none'; none.onclick = () => equipTitle('none'); }
+}
+function equipTracer(id) { if (!tracerUnlocked(id)) return; equippedTracer = id; saveTracers(); renderShop(); }
+function buyTracer(id) {
+  const t = TRACERS[id]; if (!t || tracerUnlocked(id)) return;
+  if (coins < t.cost) { const m = $('shopMsg'); if (m) m.textContent = `Need ${t.cost} coins`; return; }
+  awardCoins(-t.cost); ownedTracers.add(id); saveTracers(); equipTracer(id);
+  const m = $('shopMsg'); if (m) m.textContent = `Unlocked ${t.name} tracer!`;
 }
 function equipTitle(id) {
   if (!titleUnlocked(id) && id !== 'none') return;
@@ -2655,6 +2726,7 @@ function setupMenu() {
     .forEach(([b, p, fn]) => { const el = $(b); if (el) { const clone = el.cloneNode(true); el.replaceWith(clone); clone.addEventListener('click', () => { togglePanel(p); fn(); }); } });
   const careerBtn = $('careerBtn'); if (careerBtn) careerBtn.addEventListener('click', () => { togglePanel('careerPanel'); renderCareer(); });
   const shopBtn = $('shopBtn'); if (shopBtn) shopBtn.addEventListener('click', () => { togglePanel('shopPanel'); renderShop(); });
+  document.querySelectorAll('#shopTabs .shopcat').forEach(t => t.addEventListener('click', () => { shopCat = t.dataset.cat; renderShop(); }));
   // nav tabs: PLAY (close panels), CAREER, COSMETICS
   document.querySelectorAll('#navtabs .tab').forEach(tab => tab.addEventListener('click', () => {
     const to = tab.dataset.view;
@@ -3000,7 +3072,7 @@ function handleMsg(m) {
         spawnRocket(from, dir, false);
         SND.rocket(Math.max(0.03, 0.3 * Math.min(1, 14 / (dist + 1))));
       } else {
-        spawnTracer(from, dir, m.w);
+        spawnTracer(from, dir, m.w, undefined, m.tc);
         SND.shot(m.w, Math.max(0.02, 0.25 * Math.min(1, 14 / (dist + 1))));
       }
       if (r) r.shootAnim = 0.12;
@@ -3927,6 +3999,7 @@ function tryShoot(now) {
   }
 
   const spread = w.spread * (me.zoomed ? 0.25 : 1) * (me.onGround ? 1 : 1.8);
+  const tcol = myTracerColor(wkey); // equipped tracer-skin colour (rainbow sampled once per shot)
 
   for (let p = 0; p < w.pellets; p++) {
     const dir = baseDir.clone();
@@ -3954,11 +4027,11 @@ function tryShoot(now) {
     } else if (blockHit) {
       debrisBurst(new THREE.Vector3(origin.x + dir.x * blockHit.dist, origin.y + dir.y * blockHit.dist, origin.z + dir.z * blockHit.dist));
     }
-    spawnTracer(origin, dir, wkey, bestT);
+    spawnTracer(origin, dir, wkey, bestT, tcol);
   }
 
   SND.shot(wkey);
-  netSend({ t: 'shoot', from: { x: origin.x, y: origin.y, z: origin.z }, dir: { x: baseDir.x, y: baseDir.y, z: baseDir.z }, w: wkey });
+  netSend({ t: 'shoot', from: { x: origin.x, y: origin.y, z: origin.z }, dir: { x: baseDir.x, y: baseDir.y, z: baseDir.z }, w: wkey, tc: tcol });
   // recoil
   me.rx += w.pellets > 1 ? 0.03 : (wkey === 'sniper' ? 0.04 : 0.012);
   vm.recoil = 1;
@@ -4224,18 +4297,16 @@ function explodeGrenade(p, isLocal) {
 // ============================================================
 // FX
 // ============================================================
-function spawnTracer(origin, dir, wkey, dist) {
+function spawnTracer(origin, dir, wkey, dist, color) {
   const len = dist !== undefined ? dist : (raycastVoxels(origin, dir, 100)?.dist ?? 100);
   const end = origin.clone().addScaledVector(dir, len);
   const start = origin.clone().addScaledVector(dir, 0.8).add(new THREE.Vector3(0, -0.12, 0));
   const g = new THREE.BufferGeometry().setFromPoints([start, end]);
-  const m = new THREE.LineBasicMaterial({
-    color: wkey === 'sniper' ? 0xaadfff : 0xffd080,
-    transparent: true, opacity: 0.85,
-  });
+  const col = (color !== undefined && color !== null) ? color : (wkey === 'sniper' ? 0xaadfff : 0xffd080);
+  const m = new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.9 });
   const line = new THREE.Line(g, m);
   scene.add(line);
-  tracers.push({ obj: line, ttl: 0.09 });
+  tracers.push({ obj: line, ttl: 0.1 });
 }
 
 const MAX_PARTICLES = 260; // hard cap so heavy firefights can't flood the scene and stutter
