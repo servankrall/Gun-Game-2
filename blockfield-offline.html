@@ -390,6 +390,111 @@
   /* rotate-to-landscape hint (mobile portrait only) */
   #rotateHint { position: fixed; inset: 0; z-index: 200; display: none; align-items: center; justify-content: center; background: #000; color: #fff; font-size: 12px; text-align: center; line-height: 2; padding: 30px; }
   @media (max-width: 900px) and (orientation: portrait) { #rotateHint.armed { display: flex; } }
+
+  /* =========================================================
+     MENU 2.0 — richer background, profile card, battle pass,
+     cosmetics shop, and polished buttons/panels.
+     ========================================================= */
+  #menu { background: radial-gradient(1200px 700px at 50% -10%, #1c3050 0%, transparent 60%), linear-gradient(160deg, #14243f 0%, #0c1730 55%, #070d1c 100%); }
+  #menu::before { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(700px 500px at 12% 20%, rgba(255,90,90,.14), transparent 60%),
+      radial-gradient(700px 500px at 88% 30%, rgba(111,155,255,.16), transparent 60%),
+      radial-gradient(600px 400px at 50% 110%, rgba(233,198,90,.10), transparent 60%);
+    animation: menuGlow 14s ease-in-out infinite alternate; }
+  #menu::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0; opacity: .35;
+    background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+    background-size: 44px 44px; mask-image: radial-gradient(ellipse 80% 70% at 50% 45%, #000 40%, transparent 100%); }
+  @keyframes menuGlow { 0% { transform: translateY(0) scale(1); opacity:.85; } 100% { transform: translateY(-14px) scale(1.04); opacity:1; } }
+  #menu > * { position: relative; z-index: 1; }
+
+  /* nav tabs — now interactive */
+  #navtabs .tab { cursor: pointer; transition: color .15s, border-color .15s; text-transform: uppercase; }
+  #navtabs .tab:hover { color: #dbe4f7; }
+
+  /* topbar profile card */
+  #profileCard { margin-left: auto; display: flex; align-items: center; gap: 12px; padding: 8px 14px; border: 1px solid #2c405f;
+    background: linear-gradient(180deg, rgba(28,44,74,.72), rgba(14,24,44,.72)); border-radius: 12px; box-shadow: 0 6px 22px rgba(0,0,0,.35); backdrop-filter: blur(4px); }
+  .pc-ring { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 14px;
+    background: radial-gradient(circle at 50% 35%, #2b3f66, #14233d); border: 2px solid #ffd24a; box-shadow: 0 0 14px rgba(255,210,74,.35); }
+  .pc-mid { display: flex; flex-direction: column; gap: 4px; min-width: 150px; }
+  .pc-top { display: flex; align-items: center; gap: 8px; }
+  #pcName { color: #fff; font-size: 10px; letter-spacing: 1px; }
+  .pc-title { font-size: 7px; letter-spacing: 1px; color: #0c1122; background: linear-gradient(90deg,#ffd24a,#ffb14a); padding: 2px 6px; border-radius: 4px; }
+  .pc-xp { height: 7px; background: rgba(0,0,0,.5); border: 1px solid #000; border-radius: 4px; overflow: hidden; }
+  #pcXpBar { height: 100%; width: 0%; background: linear-gradient(90deg,#49c26a,#7be0a0); transition: width .3s ease; }
+  .pc-xptxt { font-size: 7px; color: #9fb0d0; letter-spacing: .5px; }
+  .pc-coins { color: #ffd24a; font-size: 11px; letter-spacing: 1px; display: flex; align-items: center; gap: 4px; padding-left: 6px; border-left: 1px solid #2c405f; }
+  @media (max-width: 720px) { #profileCard { display: none; } }
+
+  /* coin balance chip (center) upgrade */
+  #coinBal { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border: 1px solid #6a5a1e; border-radius: 20px;
+    background: linear-gradient(180deg, rgba(255,210,74,.14), rgba(255,210,74,.04)); width: fit-content; margin: 6px auto 8px; font-size: 11px; }
+
+  /* PLAY button — glow + pulse */
+  .playbtn { border-radius: 10px; background: linear-gradient(180deg,#ff6470,#e23b48); box-shadow: 0 0 0 3px #000, 0 8px 0 #8f1f2a, 0 14px 30px rgba(226,59,72,.45);
+    text-shadow: 2px 2px 0 #7a1620; animation: playPulse 2.6s ease-in-out infinite; }
+  .playbtn:hover { background: linear-gradient(180deg,#ff7b86,#ef4a57); transform: translateY(-1px); }
+  @keyframes playPulse { 0%,100% { box-shadow: 0 0 0 3px #000, 0 8px 0 #8f1f2a, 0 14px 30px rgba(226,59,72,.35); } 50% { box-shadow: 0 0 0 3px #000, 0 8px 0 #8f1f2a, 0 14px 40px rgba(226,59,72,.6); } }
+
+  /* link buttons — lift + accent */
+  .linkbtn { border-radius: 8px; transition: transform .12s, background .15s, border-color .15s; }
+  .linkbtn:hover { transform: translateY(-2px); border-color: #4a6299; }
+  .linkbtn.hot { border-color: #ffd24a66; color: #ffe6a8; background: linear-gradient(180deg, rgba(255,210,74,.12), rgba(255,210,74,.03)); }
+  .linkbtn.hot:hover { background: rgba(255,210,74,.2); border-color: #ffd24a; }
+
+  /* agent card frame glow */
+  .cardframe { border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.45); transition: transform .2s; }
+  #agentCard:hover .cardframe { transform: translateY(-4px); }
+
+  /* mode row chips */
+  #modeRow .mode { border-radius: 6px; transition: transform .12s, border-color .15s, color .15s; }
+  #modeRow .mode:hover { transform: translateY(-2px); color: #fff; }
+  #modeRow .mode.active { background: linear-gradient(180deg, rgba(255,194,58,.18), transparent); box-shadow: 0 0 14px rgba(255,194,58,.25); }
+
+  /* shared glassy panel look + slide-in */
+  #careerPanel, #shopPanel { display: none; flex-direction: column; gap: 10px; width: min(880px, 94vw); margin: 10px auto 0;
+    background: linear-gradient(180deg, rgba(16,28,50,.92), rgba(10,18,36,.94)); border: 1px solid #2c405f; border-radius: 14px; padding: 16px 18px;
+    box-shadow: 0 18px 60px rgba(0,0,0,.5); backdrop-filter: blur(6px); }
+  #careerPanel.open, #shopPanel.open { display: flex; animation: panelIn .22s ease-out; }
+  @keyframes panelIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  #authPanel, #friendsPanel, #leaderPanel, #awardsPanel, #optPanel { border-radius: 14px; }
+  #authPanel.open, #friendsPanel.open, #leaderPanel.open, #awardsPanel.open, #optPanel.open { animation: panelIn .22s ease-out; }
+
+  /* career / battle pass track */
+  .careerhdr { text-align: center; color: #cfd6e6; font-size: 10px; letter-spacing: 1px; }
+  .careerhdr b { color: #ffd24a; }
+  .careerbarwrap { height: 10px; background: rgba(0,0,0,.5); border: 1px solid #000; border-radius: 6px; overflow: hidden; }
+  #careerBar { height: 100%; width: 0%; background: linear-gradient(90deg,#49c26a,#7be0a0,#ffd24a); transition: width .4s ease; }
+  .careertrack { display: flex; gap: 8px; overflow-x: auto; padding: 8px 2px 12px; scroll-behavior: smooth; }
+  .careertrack::-webkit-scrollbar { height: 8px; } .careertrack::-webkit-scrollbar-thumb { background: #2c405f; border-radius: 6px; }
+  .ptier { flex: 0 0 auto; width: 74px; min-height: 92px; border: 1px solid #293c5a; border-radius: 10px; padding: 8px 6px; text-align: center;
+    background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.01)); display: flex; flex-direction: column; align-items: center; gap: 6px; opacity: .6; }
+  .ptier.done { opacity: 1; border-color: #49c26a66; background: linear-gradient(180deg, rgba(73,194,106,.14), rgba(73,194,106,.03)); }
+  .ptier.cur { opacity: 1; border-color: #ffd24a; box-shadow: 0 0 16px rgba(255,210,74,.35); }
+  .ptier .pt-n { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; color: #0c1122; background: #6c7a97; }
+  .ptier.done .pt-n { background: #49c26a; } .ptier.cur .pt-n { background: #ffd24a; }
+  .ptier .pt-r { color: #ffd24a; font-size: 9px; display: flex; align-items: center; gap: 3px; }
+  .ptier .pt-t { font-size: 6px; letter-spacing: .5px; color: #0c1122; background: linear-gradient(90deg,#ffd24a,#ffb14a); padding: 3px 4px; border-radius: 4px; line-height: 1.3; }
+
+  /* cosmetics shop */
+  .shoptop { display: flex; align-items: center; gap: 12px; justify-content: center; }
+  .shopgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; max-height: 46vh; overflow-y: auto; padding: 4px; }
+  .shop-card { border: 1px solid #293c5a; border-radius: 10px; padding: 12px 10px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px;
+    background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.01)); transition: transform .12s, border-color .15s; }
+  .shop-card:hover { transform: translateY(-3px); border-color: #4a6299; }
+  .shop-card.owned { border-color: #49c26a55; }
+  .shop-card.equipped { border-color: #ffd24a; box-shadow: 0 0 16px rgba(255,210,74,.3); }
+  .shop-title { font-size: 11px; color: #fff; letter-spacing: 1px; }
+  .shop-src { font-size: 7px; color: #8fa0c0; letter-spacing: .5px; }
+  .shop-b { font-family: inherit; font-size: 8px; letter-spacing: 1px; padding: 7px 10px; border-radius: 6px; cursor: pointer; border: 2px solid #000;
+    background: #e9c65a; color: #2a1c00; display: inline-flex; align-items: center; gap: 4px; }
+  .shop-b:hover { filter: brightness(1.08); }
+  .shop-b.eq { background: #49c26a; color: #05210f; }
+  .shop-b.buy { background: linear-gradient(180deg,#ffd979,#f0b93f); }
+  .shop-b.lock { background: #33425f; color: #9fb0d0; cursor: default; border-color: #22314c; }
+  .shop-b:disabled { cursor: default; }
+  .shop-b .coin { width: 10px; height: 10px; }
 </style>
 <script>(function(){try{var t=false;try{t=window.self===window.top}catch(e){t=false}if(t){var u=new URL(location.href);if(u.searchParams.has('__raw')){u.searchParams.delete('__raw');location.replace(u.pathname+u.search+u.hash)}}}catch(e){}})()</script></head>
 <body>
@@ -399,9 +504,18 @@
     <div id="topbar">
       <div class="logo"><span class="lb1">BLOCK</span><span class="lb2">FIELD</span></div>
       <div id="navtabs">
-        <span class="tab active">PLAY</span>
-        <span class="tab">AGENTS</span>
-        <span class="tab">CAREER</span>
+        <span class="tab active" data-view="play">PLAY</span>
+        <span class="tab" data-view="career">CAREER</span>
+        <span class="tab" data-view="shop">COSMETICS</span>
+      </div>
+      <div id="profileCard">
+        <div class="pc-ring"><span id="pcLevel">1</span></div>
+        <div class="pc-mid">
+          <div class="pc-top"><span id="pcName">PLAYER</span><span id="pcTitle" class="pc-title">—</span></div>
+          <div class="pc-xp"><div id="pcXpBar"></div></div>
+          <div id="pcXpTxt" class="pc-xptxt">0 / 500 XP</div>
+        </div>
+        <div id="pcCoins" class="pc-coins"></div>
       </div>
       <button id="optBtn" class="gear" title="Options">⚙</button>
     </div>
@@ -445,6 +559,8 @@
         </div>
       </div>
       <div class="bside right">
+        <button id="careerBtn" class="linkbtn hot">CAREER</button>
+        <button id="shopBtn" class="linkbtn hot">COSMETICS</button>
         <button id="inviteBtn" class="linkbtn">INVITE FRIENDS</button>
         <button id="friendsBtn" class="linkbtn">FRIENDS</button>
         <button id="authBtn" class="linkbtn">ACCOUNT</button>
@@ -488,6 +604,19 @@
     <div id="awardsPanel">
       <div class="ltitle">ACHIEVEMENTS</div>
       <div id="awardsList"></div>
+    </div>
+
+    <div id="careerPanel">
+      <div class="ltitle">CAREER — BATTLE PASS <span class="asub">(earn XP from kills, waves &amp; wins)</span></div>
+      <div id="careerHdr" class="careerhdr"></div>
+      <div class="careerbarwrap"><div id="careerBar"></div></div>
+      <div id="careerTrack" class="careertrack"></div>
+    </div>
+
+    <div id="shopPanel">
+      <div class="ltitle">COSMETICS — TITLES <span class="asub">(shown above your name in-game)</span></div>
+      <div class="shoptop"><button id="shopUnequip" class="shop-b">UNEQUIP</button><span id="shopMsg" class="amsg"></span></div>
+      <div id="shopGrid" class="shopgrid"></div>
     </div>
 
     <div id="optPanel">
@@ -1034,7 +1163,7 @@ class GameServer {
 
   // ---- combatant helpers ----
   entities(r) { return [...r.clients.values()].map(c => c.player).concat([...r.bots.values()]); }
-  pub(p) { return { id: p.id, name: p.name, team: p.team, pos: p.pos, ry: p.ry, rx: p.rx, anim: p.anim, alive: p.alive, hp: p.hp, kills: p.kills, deaths: p.deaths, bot: !!p.bot, agent: p.agent || 'soldier', color: p.color, rankTier: p.rankTier }; }
+  pub(p) { return { id: p.id, name: p.name, team: p.team, pos: p.pos, ry: p.ry, rx: p.rx, anim: p.anim, alive: p.alive, hp: p.hp, kills: p.kills, deaths: p.deaths, bot: !!p.bot, agent: p.agent || 'soldier', color: p.color, rankTier: p.rankTier, title: p.title || null }; }
   count(r) { return r.clients.size + r.bots.size; }
   teamCount(r, team) { return this.entities(r).filter(e => e.team === team).length; }
   humanTeamCount(r, team) { return [...r.clients.values()].filter(c => c.player.team === team).length; }
@@ -1065,6 +1194,7 @@ class GameServer {
     const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, lastHit: 0, level: 0,
       acct: m.acct ? String(m.acct).toLowerCase().slice(0, 16) : null,
       color: (typeof m.color === 'number' && m.color >= 0 && m.color <= 0xffffff) ? (m.color | 0) : null,
+      title: m.title ? String(m.title).slice(0, 18) : null,
       agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.clients.set(id, { ws, player });
 
@@ -2026,8 +2156,122 @@ function isUnlocked(id) { return (AGENTS[id]?.cost || 0) === 0 || unlocked.has(i
 function saveCoins() { if (account) syncAccount(); else localStorage.setItem('bf_coins', String(coins)); }
 function saveUnlocked() { if (account) syncAccount(); else localStorage.setItem('bf_unlocked', JSON.stringify([...unlocked])); }
 const COIN = '<span class="coin"></span>'; // CSS gold-coin icon (emoji renders as tofu in the pixel font)
-function setCoinBal() { const el = $('coinBal'); if (el) el.innerHTML = COIN + coins; if (coins >= 1000) unlockAch('rich'); }
+function setCoinBal() { const el = $('coinBal'); if (el) el.innerHTML = COIN + coins; if (coins >= 1000) unlockAch('rich'); updateProfileCard(); }
 function awardCoins(n) { coins += n; saveCoins(); setCoinBal(); }
+
+// ============================================================
+// Career + Battle Pass + Cosmetics (titles)
+// ============================================================
+let careerXp = Math.max(0, parseInt(localStorage.getItem('bf_xp')) || 0);
+const XP_PER_TIER = 500, MAX_TIER = 50;
+function careerLevel() { return Math.min(MAX_TIER, 1 + Math.floor(careerXp / XP_PER_TIER)); }
+function tierFrac() { return Math.min(1, (careerXp % XP_PER_TIER) / XP_PER_TIER); }
+function saveXp() { localStorage.setItem('bf_xp', String(careerXp)); }
+// Cosmetic titles: some unlock free at a career tier, some are coin-shop exclusives.
+const TITLES = {
+  none:         { name: 'NO TITLE', tier: 0, cost: 0 },
+  rookie:       { name: 'ROOKIE', tier: 2, cost: 0 },
+  fighter:      { name: 'FIGHTER', tier: 4, cost: 0 },
+  sharpshooter: { name: 'SHARPSHOOTER', tier: 7, cost: 0 },
+  veteran:      { name: 'VETERAN', tier: 11, cost: 0 },
+  warlord:      { name: 'WARLORD', tier: 16, cost: 0 },
+  elite:        { name: 'ELITE', tier: 24, cost: 0 },
+  legend:       { name: 'LEGEND', tier: 35, cost: 0 },
+  apex:         { name: 'APEX', tier: 50, cost: 0 },
+  ghost:        { name: 'GHOST', tier: 0, cost: 400 },
+  reaper:       { name: 'REAPER', tier: 0, cost: 800 },
+  overlord:     { name: 'OVERLORD', tier: 0, cost: 1500 },
+  godmode:      { name: 'GOD MODE', tier: 0, cost: 3000 },
+};
+let ownedTitles = (() => { try { const a = JSON.parse(localStorage.getItem('bf_titles')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
+ownedTitles.add('none');
+let equippedTitle = localStorage.getItem('bf_title') || 'none';
+function saveTitles() { localStorage.setItem('bf_titles', JSON.stringify([...ownedTitles])); localStorage.setItem('bf_title', equippedTitle); }
+function titleUnlocked(id) { const t = TITLES[id]; if (!t) return false; if (ownedTitles.has(id)) return true; return t.tier > 0 && careerLevel() >= t.tier; }
+function titleText(id) { const t = TITLES[id]; return (t && id !== 'none') ? t.name : ''; }
+function awardXp(n) {
+  if (!(n > 0)) return;
+  const before = careerLevel();
+  careerXp += n; saveXp();
+  const after = careerLevel();
+  if (after > before) {
+    let reward = 0; for (let t = before + 1; t <= after; t++) reward += 40 + t * 5;
+    awardCoins(reward);
+    if (inGame) announce(`CAREER LEVEL ${after}!  +${reward}`, '#ffd24a');
+    try { feed(`Reached career level ${after} — +${reward} coins!`, myTeam); } catch {}
+    renderCareer(); renderShop();
+  }
+  updateProfileCard();
+}
+// Top-bar profile card (level ring, xp bar, coins, equipped title).
+function updateProfileCard() {
+  const lvl = careerLevel();
+  const set = (id, html) => { const e = $(id); if (e) e.innerHTML = html; };
+  set('pcLevel', String(lvl));
+  const bar = $('pcXpBar'); if (bar) bar.style.width = Math.round(tierFrac() * 100) + '%';
+  set('pcXpTxt', lvl >= MAX_TIER ? 'MAX' : `${careerXp % XP_PER_TIER} / ${XP_PER_TIER} XP`);
+  set('pcCoins', COIN + coins);
+  const tt = $('pcTitle'); if (tt) { const t = titleText(equippedTitle); tt.textContent = t || 'NO TITLE'; tt.style.opacity = t ? '1' : '0.5'; }
+  const nm = $('pcName'); if (nm) nm.textContent = (localStorage.getItem('blockade_name') || (typeof input !== 'undefined' && input && input.value) || 'PLAYER').toUpperCase();
+}
+// Battle-pass track: tiers 1..MAX with their reward + any title unlock.
+function renderCareer() {
+  const box = $('careerTrack'); if (!box) return;
+  const lvl = careerLevel();
+  const titleAt = {}; for (const id in TITLES) if (TITLES[id].tier > 0) titleAt[TITLES[id].tier] = TITLES[id].name;
+  let h = '';
+  for (let t = 1; t <= MAX_TIER; t++) {
+    const done = lvl >= t, cur = lvl === t;
+    const reward = 40 + t * 5;
+    const title = titleAt[t];
+    h += `<div class="ptier ${done ? 'done' : ''} ${cur ? 'cur' : ''}">
+      <div class="pt-n">${t}</div>
+      <div class="pt-r">${COIN}${reward}</div>
+      ${title ? `<div class="pt-t">${title}</div>` : ''}
+    </div>`;
+  }
+  box.innerHTML = h;
+  const hdr = $('careerHdr');
+  if (hdr) hdr.innerHTML = `LEVEL <b>${lvl}</b> / ${MAX_TIER} &nbsp;·&nbsp; <span style="color:#9fb0d0">${lvl >= MAX_TIER ? 'MAX RANK' : `${careerXp % XP_PER_TIER} / ${XP_PER_TIER} XP to next`}</span>`;
+  const fill = $('careerBar'); if (fill) fill.style.width = Math.round(tierFrac() * 100) + '%';
+  // auto-scroll to current tier
+  const curEl = box.querySelector('.ptier.cur'); if (curEl) curEl.scrollIntoView({ inline: 'center', block: 'nearest' });
+}
+// Cosmetics shop: buy / equip titles.
+function renderShop() {
+  const box = $('shopGrid'); if (!box) return;
+  let h = '';
+  for (const id in TITLES) {
+    if (id === 'none') continue;
+    const t = TITLES[id], owned = titleUnlocked(id), equipped = equippedTitle === id;
+    let action;
+    if (equipped) action = `<button class="shop-b eq" disabled>EQUIPPED</button>`;
+    else if (owned) action = `<button class="shop-b" data-equip="${id}">EQUIP</button>`;
+    else if (t.tier > 0) action = `<button class="shop-b lock" disabled>LEVEL ${t.tier}</button>`;
+    else action = `<button class="shop-b buy" data-buy="${id}">${COIN}${t.cost}</button>`;
+    h += `<div class="shop-card ${owned ? 'owned' : ''} ${equipped ? 'equipped' : ''}">
+      <div class="shop-title">${t.name}</div>
+      <div class="shop-src">${t.tier > 0 ? 'Career reward' : 'Shop exclusive'}</div>
+      ${action}
+    </div>`;
+  }
+  box.innerHTML = h;
+  box.querySelectorAll('[data-equip]').forEach(b => b.addEventListener('click', () => { equipTitle(b.dataset.equip); }));
+  box.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => { buyTitle(b.dataset.buy); }));
+  const none = $('shopUnequip'); if (none) none.onclick = () => equipTitle('none');
+}
+function equipTitle(id) {
+  if (!titleUnlocked(id) && id !== 'none') return;
+  equippedTitle = id; saveTitles(); renderShop(); updateProfileCard();
+}
+function buyTitle(id) {
+  const t = TITLES[id]; if (!t || titleUnlocked(id)) return;
+  if (coins < t.cost) { const m = $('shopMsg'); if (m) m.textContent = `Need ${t.cost} coins`; return; }
+  awardCoins(-t.cost); ownedTitles.add(id); saveTitles();
+  equipTitle(id);
+  const m = $('shopMsg'); if (m) m.textContent = `Unlocked ${t.name}!`;
+  renderShop();
+}
 // ---- achievements (one-off milestones, small coin rewards, persisted) ----
 const ACHIEVEMENTS = {
   firstkill: { name: 'FIRST BLOOD', reward: 20 },
@@ -2361,7 +2605,7 @@ function setupMenu() {
   if (myRoom && inv) inv.textContent = 'ROOM: ' + myRoom + ' (copy link)';
 
   // let auth changes refresh the menu view (coins, chips, friends, auth state)
-  menuRefresh = () => { renderAgent(); renderFriends(); renderAuth(); setCoinBal(); };
+  menuRefresh = () => { renderAgent(); renderFriends(); renderAuth(); setCoinBal(); updateProfileCard(); renderCareer(); renderShop(); };
 
   // ---- account panel ----
   renderAuth();
@@ -2401,6 +2645,25 @@ function setupMenu() {
   const aw = $('awardsBtn');
   if (aw) aw.addEventListener('click', () => { $('awardsPanel').classList.toggle('open'); renderAchievements(); });
   renderAchievements();
+
+  // ---- career (battle pass) + cosmetics shop ----
+  const closeAllPanels = () => ['authPanel', 'friendsPanel', 'leaderPanel', 'awardsPanel', 'optPanel', 'careerPanel', 'shopPanel'].forEach(p => { const e = $(p); if (e) e.classList.remove('open'); });
+  const togglePanel = id => { const el = $(id); const was = el.classList.contains('open'); closeAllPanels(); if (!was) el.classList.add('open'); };
+  // route the existing link buttons through the exclusive toggler for a cleaner feel
+  [['authBtn', 'authPanel', () => connectLobby()], ['friendsBtn', 'friendsPanel', () => { connectLobby(); requestPresence(); }],
+   ['leaderBtn', 'leaderPanel', () => { connectLobby(); authSend({ t: 'leaderboard' }); }], ['awardsBtn', 'awardsPanel', () => renderAchievements()]]
+    .forEach(([b, p, fn]) => { const el = $(b); if (el) { const clone = el.cloneNode(true); el.replaceWith(clone); clone.addEventListener('click', () => { togglePanel(p); fn(); }); } });
+  const careerBtn = $('careerBtn'); if (careerBtn) careerBtn.addEventListener('click', () => { togglePanel('careerPanel'); renderCareer(); });
+  const shopBtn = $('shopBtn'); if (shopBtn) shopBtn.addEventListener('click', () => { togglePanel('shopPanel'); renderShop(); });
+  // nav tabs: PLAY (close panels), CAREER, COSMETICS
+  document.querySelectorAll('#navtabs .tab').forEach(tab => tab.addEventListener('click', () => {
+    const to = tab.dataset.view;
+    document.querySelectorAll('#navtabs .tab').forEach(t => t.classList.toggle('active', t === tab));
+    if (to === 'career') { togglePanel('careerPanel'); renderCareer(); }
+    else if (to === 'shop') { togglePanel('shopPanel'); renderShop(); }
+    else closeAllPanels();
+  }));
+  updateProfileCard(); renderCareer(); renderShop();
 }
 
 // ============================================================
@@ -2605,7 +2868,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId(), acct: account ? account.user : null, color: (typeof myColor === 'number' ? myColor : undefined) }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId(), acct: account ? account.user : null, color: (typeof myColor === 'number' ? myColor : undefined), title: titleText(equippedTitle) }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -2679,7 +2942,7 @@ function handleMsg(m) {
       if (rr && rr.group.userData.nameSprite) {
         const ud = rr.group.userData;
         rr.group.remove(ud.nameSprite);
-        const ns = makeNameSprite(ud.name, ud.team, m.tier);
+        const ns = makeNameSprite(ud.name, ud.team, m.tier, ud.title);
         rr.group.add(ns); ud.nameSprite = ns; ud.tier = m.tier;
       }
       break;
@@ -2701,6 +2964,7 @@ function handleMsg(m) {
       } else if (m.ev === 'clear') {
         announce(`WAVE ${m.wave} CLEARED!  +${m.reward}`, '#ffd24a'); SND.kill();
         awardCoins(m.reward || 0);
+        awardXp((m.wave || 1) * 15);
         feed(`Wave ${m.wave} cleared! Next wave soon…`, myTeam);
       }
       break;
@@ -2947,6 +3211,7 @@ function showMatchOver(winner, sc, winnerName) {
   if (gameMode === 'gg') {
     const win = (winnerName && winnerName === myName);
     awardCoins(win ? 120 : 40);
+    awardXp(win ? 250 : 90);
     if (win) { unlockAch('win'); unlockAch('ggwin'); }
     $('matchOverTitle').textContent = (winnerName || 'SOMEONE') + ' WINS!';
     $('matchOverTitle').style.color = win ? '#ffd24a' : (TEAM_COL[winner] || '#fff');
@@ -2956,6 +3221,7 @@ function showMatchOver(winner, sc, winnerName) {
   }
   if (gameMode === 'surv') {
     awardCoins(150);
+    awardXp(300);
     unlockAch('win');
     $('matchOverTitle').textContent = 'YOU SURVIVED!';
     $('matchOverTitle').style.color = '#ffd24a';
@@ -2965,6 +3231,7 @@ function showMatchOver(winner, sc, winnerName) {
   }
   const win = (winner === myTeam);
   awardCoins(win ? 120 : 40);
+  awardXp(win ? 220 : 80);
   if (win) unlockAch('win');
   $('matchOverTitle').textContent = (winner === 'red' ? 'RED' : 'BLUE') + ' TEAM WINS';
   $('matchOverTitle').style.color = TEAM_COL[winner] || '#fff';
@@ -3005,6 +3272,7 @@ function onMyKill() {
   if (SPREE_NAMES[killStreak]) { msg = SPREE_NAMES[killStreak]; col = '#ffd24a'; } // spree milestone wins
   if (msg) announce(msg, col);
   awardCoins(10); // coins toward unlocking classes
+  awardXp(25);    // career progress
   unlockAch('firstkill');
   if (killStreak >= 5) unlockAch('spree5');
 }
@@ -3419,19 +3687,22 @@ function makeFaceTexture() {
 let faceTex = null;
 
 const RANK_COL = { BRONZE: '#cd7f32', SILVER: '#c0c0c0', GOLD: '#ffd24a', PLATINUM: '#5fe0d0', DIAMOND: '#7dd3fc', MASTER: '#ff5cc8' };
-function makeNameSprite(name, team, tier) {
+function makeNameSprite(name, team, tier, title) {
   const c = document.createElement('canvas');
   const g = c.getContext('2d');
   g.font = '28px monospace';
-  const w = Math.max(64, g.measureText(name).width + 24);
-  const h = tier ? 66 : 44;
+  const w = Math.max(64, g.measureText(name).width + 24, title ? g.measureText(title).width + 20 : 0);
+  const topPad = (tier ? 22 : 0) + (title ? 20 : 0);
+  const h = 44 + topPad;
   c.width = w; c.height = h;
   const g2 = c.getContext('2d');
   g2.fillStyle = 'rgba(0,0,0,0.45)'; g2.fillRect(0, 0, w, h);
   g2.textAlign = 'center'; g2.textBaseline = 'middle';
-  if (tier) { g2.font = 'bold 18px monospace'; g2.fillStyle = RANK_COL[tier] || '#7dd3fc'; g2.fillText(tier, w / 2, 14); }
+  let y = 14;
+  if (title) { g2.font = 'bold 15px monospace'; g2.fillStyle = '#ffd24a'; g2.fillText(title, w / 2, y); y += 20; }
+  if (tier) { g2.font = 'bold 18px monospace'; g2.fillStyle = RANK_COL[tier] || '#7dd3fc'; g2.fillText(tier, w / 2, y); y += 22; }
   g2.font = 'bold 28px monospace'; g2.fillStyle = TEAM_COL[team];
-  g2.fillText(name, w / 2, tier ? 45 : 23);
+  g2.fillText(name, w / 2, h - 21);
   const t = new THREE.CanvasTexture(c);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t }));
   sp.scale.set(w / 70, h / 70, 1);
@@ -3439,7 +3710,7 @@ function makeNameSprite(name, team, tier) {
   return sp;
 }
 
-function makeCharacter(team, name, agentId, color, tier) {
+function makeCharacter(team, name, agentId, color, tier, title) {
   const group = new THREE.Group();
   const accentCol = (typeof color === 'number' && color >= 0) ? color : (AGENTS[agentId]?.accent ?? 0x9aa4b2);
   const skin = new THREE.MeshLambertMaterial({ color: 0xd8a37a });
@@ -3476,15 +3747,15 @@ function makeCharacter(team, name, agentId, color, tier) {
   helmet.position.y = 1.92;
 
   [head, body, armL, armR, legL, legR, gun, helmet].forEach(o => { o.castShadow = true; group.add(o); });
-  const nameSprite = makeNameSprite(name, team, tier);
+  const nameSprite = makeNameSprite(name, team, tier, title);
   group.add(nameSprite);
-  group.userData = { head, armL, armR, legL, legR, gun, nameSprite, name, team };
+  group.userData = { head, armL, armR, legL, legR, gun, nameSprite, name, team, title, tier };
   return group;
 }
 
 function addRemote(p) {
   if (remotes.has(p.id)) return;
-  const group = makeCharacter(p.team, p.name, p.agent, p.color, p.rankTier);
+  const group = makeCharacter(p.team, p.name, p.agent, p.color, p.rankTier, p.title);
   group.position.set(p.pos.x, p.pos.y, p.pos.z);
   group.rotation.y = p.ry + Math.PI;
   group.visible = p.alive;

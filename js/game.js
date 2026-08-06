@@ -145,8 +145,122 @@ function isUnlocked(id) { return (AGENTS[id]?.cost || 0) === 0 || unlocked.has(i
 function saveCoins() { if (account) syncAccount(); else localStorage.setItem('bf_coins', String(coins)); }
 function saveUnlocked() { if (account) syncAccount(); else localStorage.setItem('bf_unlocked', JSON.stringify([...unlocked])); }
 const COIN = '<span class="coin"></span>'; // CSS gold-coin icon (emoji renders as tofu in the pixel font)
-function setCoinBal() { const el = $('coinBal'); if (el) el.innerHTML = COIN + coins; if (coins >= 1000) unlockAch('rich'); }
+function setCoinBal() { const el = $('coinBal'); if (el) el.innerHTML = COIN + coins; if (coins >= 1000) unlockAch('rich'); updateProfileCard(); }
 function awardCoins(n) { coins += n; saveCoins(); setCoinBal(); }
+
+// ============================================================
+// Career + Battle Pass + Cosmetics (titles)
+// ============================================================
+let careerXp = Math.max(0, parseInt(localStorage.getItem('bf_xp')) || 0);
+const XP_PER_TIER = 500, MAX_TIER = 50;
+function careerLevel() { return Math.min(MAX_TIER, 1 + Math.floor(careerXp / XP_PER_TIER)); }
+function tierFrac() { return Math.min(1, (careerXp % XP_PER_TIER) / XP_PER_TIER); }
+function saveXp() { localStorage.setItem('bf_xp', String(careerXp)); }
+// Cosmetic titles: some unlock free at a career tier, some are coin-shop exclusives.
+const TITLES = {
+  none:         { name: 'NO TITLE', tier: 0, cost: 0 },
+  rookie:       { name: 'ROOKIE', tier: 2, cost: 0 },
+  fighter:      { name: 'FIGHTER', tier: 4, cost: 0 },
+  sharpshooter: { name: 'SHARPSHOOTER', tier: 7, cost: 0 },
+  veteran:      { name: 'VETERAN', tier: 11, cost: 0 },
+  warlord:      { name: 'WARLORD', tier: 16, cost: 0 },
+  elite:        { name: 'ELITE', tier: 24, cost: 0 },
+  legend:       { name: 'LEGEND', tier: 35, cost: 0 },
+  apex:         { name: 'APEX', tier: 50, cost: 0 },
+  ghost:        { name: 'GHOST', tier: 0, cost: 400 },
+  reaper:       { name: 'REAPER', tier: 0, cost: 800 },
+  overlord:     { name: 'OVERLORD', tier: 0, cost: 1500 },
+  godmode:      { name: 'GOD MODE', tier: 0, cost: 3000 },
+};
+let ownedTitles = (() => { try { const a = JSON.parse(localStorage.getItem('bf_titles')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
+ownedTitles.add('none');
+let equippedTitle = localStorage.getItem('bf_title') || 'none';
+function saveTitles() { localStorage.setItem('bf_titles', JSON.stringify([...ownedTitles])); localStorage.setItem('bf_title', equippedTitle); }
+function titleUnlocked(id) { const t = TITLES[id]; if (!t) return false; if (ownedTitles.has(id)) return true; return t.tier > 0 && careerLevel() >= t.tier; }
+function titleText(id) { const t = TITLES[id]; return (t && id !== 'none') ? t.name : ''; }
+function awardXp(n) {
+  if (!(n > 0)) return;
+  const before = careerLevel();
+  careerXp += n; saveXp();
+  const after = careerLevel();
+  if (after > before) {
+    let reward = 0; for (let t = before + 1; t <= after; t++) reward += 40 + t * 5;
+    awardCoins(reward);
+    if (inGame) announce(`CAREER LEVEL ${after}!  +${reward}`, '#ffd24a');
+    try { feed(`Reached career level ${after} — +${reward} coins!`, myTeam); } catch {}
+    renderCareer(); renderShop();
+  }
+  updateProfileCard();
+}
+// Top-bar profile card (level ring, xp bar, coins, equipped title).
+function updateProfileCard() {
+  const lvl = careerLevel();
+  const set = (id, html) => { const e = $(id); if (e) e.innerHTML = html; };
+  set('pcLevel', String(lvl));
+  const bar = $('pcXpBar'); if (bar) bar.style.width = Math.round(tierFrac() * 100) + '%';
+  set('pcXpTxt', lvl >= MAX_TIER ? 'MAX' : `${careerXp % XP_PER_TIER} / ${XP_PER_TIER} XP`);
+  set('pcCoins', COIN + coins);
+  const tt = $('pcTitle'); if (tt) { const t = titleText(equippedTitle); tt.textContent = t || 'NO TITLE'; tt.style.opacity = t ? '1' : '0.5'; }
+  const nm = $('pcName'); if (nm) nm.textContent = (localStorage.getItem('blockade_name') || (typeof input !== 'undefined' && input && input.value) || 'PLAYER').toUpperCase();
+}
+// Battle-pass track: tiers 1..MAX with their reward + any title unlock.
+function renderCareer() {
+  const box = $('careerTrack'); if (!box) return;
+  const lvl = careerLevel();
+  const titleAt = {}; for (const id in TITLES) if (TITLES[id].tier > 0) titleAt[TITLES[id].tier] = TITLES[id].name;
+  let h = '';
+  for (let t = 1; t <= MAX_TIER; t++) {
+    const done = lvl >= t, cur = lvl === t;
+    const reward = 40 + t * 5;
+    const title = titleAt[t];
+    h += `<div class="ptier ${done ? 'done' : ''} ${cur ? 'cur' : ''}">
+      <div class="pt-n">${t}</div>
+      <div class="pt-r">${COIN}${reward}</div>
+      ${title ? `<div class="pt-t">${title}</div>` : ''}
+    </div>`;
+  }
+  box.innerHTML = h;
+  const hdr = $('careerHdr');
+  if (hdr) hdr.innerHTML = `LEVEL <b>${lvl}</b> / ${MAX_TIER} &nbsp;·&nbsp; <span style="color:#9fb0d0">${lvl >= MAX_TIER ? 'MAX RANK' : `${careerXp % XP_PER_TIER} / ${XP_PER_TIER} XP to next`}</span>`;
+  const fill = $('careerBar'); if (fill) fill.style.width = Math.round(tierFrac() * 100) + '%';
+  // auto-scroll to current tier
+  const curEl = box.querySelector('.ptier.cur'); if (curEl) curEl.scrollIntoView({ inline: 'center', block: 'nearest' });
+}
+// Cosmetics shop: buy / equip titles.
+function renderShop() {
+  const box = $('shopGrid'); if (!box) return;
+  let h = '';
+  for (const id in TITLES) {
+    if (id === 'none') continue;
+    const t = TITLES[id], owned = titleUnlocked(id), equipped = equippedTitle === id;
+    let action;
+    if (equipped) action = `<button class="shop-b eq" disabled>EQUIPPED</button>`;
+    else if (owned) action = `<button class="shop-b" data-equip="${id}">EQUIP</button>`;
+    else if (t.tier > 0) action = `<button class="shop-b lock" disabled>LEVEL ${t.tier}</button>`;
+    else action = `<button class="shop-b buy" data-buy="${id}">${COIN}${t.cost}</button>`;
+    h += `<div class="shop-card ${owned ? 'owned' : ''} ${equipped ? 'equipped' : ''}">
+      <div class="shop-title">${t.name}</div>
+      <div class="shop-src">${t.tier > 0 ? 'Career reward' : 'Shop exclusive'}</div>
+      ${action}
+    </div>`;
+  }
+  box.innerHTML = h;
+  box.querySelectorAll('[data-equip]').forEach(b => b.addEventListener('click', () => { equipTitle(b.dataset.equip); }));
+  box.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => { buyTitle(b.dataset.buy); }));
+  const none = $('shopUnequip'); if (none) none.onclick = () => equipTitle('none');
+}
+function equipTitle(id) {
+  if (!titleUnlocked(id) && id !== 'none') return;
+  equippedTitle = id; saveTitles(); renderShop(); updateProfileCard();
+}
+function buyTitle(id) {
+  const t = TITLES[id]; if (!t || titleUnlocked(id)) return;
+  if (coins < t.cost) { const m = $('shopMsg'); if (m) m.textContent = `Need ${t.cost} coins`; return; }
+  awardCoins(-t.cost); ownedTitles.add(id); saveTitles();
+  equipTitle(id);
+  const m = $('shopMsg'); if (m) m.textContent = `Unlocked ${t.name}!`;
+  renderShop();
+}
 // ---- achievements (one-off milestones, small coin rewards, persisted) ----
 const ACHIEVEMENTS = {
   firstkill: { name: 'FIRST BLOOD', reward: 20 },
@@ -480,7 +594,7 @@ function setupMenu() {
   if (myRoom && inv) inv.textContent = 'ROOM: ' + myRoom + ' (copy link)';
 
   // let auth changes refresh the menu view (coins, chips, friends, auth state)
-  menuRefresh = () => { renderAgent(); renderFriends(); renderAuth(); setCoinBal(); };
+  menuRefresh = () => { renderAgent(); renderFriends(); renderAuth(); setCoinBal(); updateProfileCard(); renderCareer(); renderShop(); };
 
   // ---- account panel ----
   renderAuth();
@@ -520,6 +634,25 @@ function setupMenu() {
   const aw = $('awardsBtn');
   if (aw) aw.addEventListener('click', () => { $('awardsPanel').classList.toggle('open'); renderAchievements(); });
   renderAchievements();
+
+  // ---- career (battle pass) + cosmetics shop ----
+  const closeAllPanels = () => ['authPanel', 'friendsPanel', 'leaderPanel', 'awardsPanel', 'optPanel', 'careerPanel', 'shopPanel'].forEach(p => { const e = $(p); if (e) e.classList.remove('open'); });
+  const togglePanel = id => { const el = $(id); const was = el.classList.contains('open'); closeAllPanels(); if (!was) el.classList.add('open'); };
+  // route the existing link buttons through the exclusive toggler for a cleaner feel
+  [['authBtn', 'authPanel', () => connectLobby()], ['friendsBtn', 'friendsPanel', () => { connectLobby(); requestPresence(); }],
+   ['leaderBtn', 'leaderPanel', () => { connectLobby(); authSend({ t: 'leaderboard' }); }], ['awardsBtn', 'awardsPanel', () => renderAchievements()]]
+    .forEach(([b, p, fn]) => { const el = $(b); if (el) { const clone = el.cloneNode(true); el.replaceWith(clone); clone.addEventListener('click', () => { togglePanel(p); fn(); }); } });
+  const careerBtn = $('careerBtn'); if (careerBtn) careerBtn.addEventListener('click', () => { togglePanel('careerPanel'); renderCareer(); });
+  const shopBtn = $('shopBtn'); if (shopBtn) shopBtn.addEventListener('click', () => { togglePanel('shopPanel'); renderShop(); });
+  // nav tabs: PLAY (close panels), CAREER, COSMETICS
+  document.querySelectorAll('#navtabs .tab').forEach(tab => tab.addEventListener('click', () => {
+    const to = tab.dataset.view;
+    document.querySelectorAll('#navtabs .tab').forEach(t => t.classList.toggle('active', t === tab));
+    if (to === 'career') { togglePanel('careerPanel'); renderCareer(); }
+    else if (to === 'shop') { togglePanel('shopPanel'); renderShop(); }
+    else closeAllPanels();
+  }));
+  updateProfileCard(); renderCareer(); renderShop();
 }
 
 // ============================================================
@@ -724,7 +857,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId(), acct: account ? account.user : null, color: (typeof myColor === 'number' ? myColor : undefined) }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId(), acct: account ? account.user : null, color: (typeof myColor === 'number' ? myColor : undefined), title: titleText(equippedTitle) }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -798,7 +931,7 @@ function handleMsg(m) {
       if (rr && rr.group.userData.nameSprite) {
         const ud = rr.group.userData;
         rr.group.remove(ud.nameSprite);
-        const ns = makeNameSprite(ud.name, ud.team, m.tier);
+        const ns = makeNameSprite(ud.name, ud.team, m.tier, ud.title);
         rr.group.add(ns); ud.nameSprite = ns; ud.tier = m.tier;
       }
       break;
@@ -820,6 +953,7 @@ function handleMsg(m) {
       } else if (m.ev === 'clear') {
         announce(`WAVE ${m.wave} CLEARED!  +${m.reward}`, '#ffd24a'); SND.kill();
         awardCoins(m.reward || 0);
+        awardXp((m.wave || 1) * 15);
         feed(`Wave ${m.wave} cleared! Next wave soon…`, myTeam);
       }
       break;
@@ -1066,6 +1200,7 @@ function showMatchOver(winner, sc, winnerName) {
   if (gameMode === 'gg') {
     const win = (winnerName && winnerName === myName);
     awardCoins(win ? 120 : 40);
+    awardXp(win ? 250 : 90);
     if (win) { unlockAch('win'); unlockAch('ggwin'); }
     $('matchOverTitle').textContent = (winnerName || 'SOMEONE') + ' WINS!';
     $('matchOverTitle').style.color = win ? '#ffd24a' : (TEAM_COL[winner] || '#fff');
@@ -1075,6 +1210,7 @@ function showMatchOver(winner, sc, winnerName) {
   }
   if (gameMode === 'surv') {
     awardCoins(150);
+    awardXp(300);
     unlockAch('win');
     $('matchOverTitle').textContent = 'YOU SURVIVED!';
     $('matchOverTitle').style.color = '#ffd24a';
@@ -1084,6 +1220,7 @@ function showMatchOver(winner, sc, winnerName) {
   }
   const win = (winner === myTeam);
   awardCoins(win ? 120 : 40);
+  awardXp(win ? 220 : 80);
   if (win) unlockAch('win');
   $('matchOverTitle').textContent = (winner === 'red' ? 'RED' : 'BLUE') + ' TEAM WINS';
   $('matchOverTitle').style.color = TEAM_COL[winner] || '#fff';
@@ -1124,6 +1261,7 @@ function onMyKill() {
   if (SPREE_NAMES[killStreak]) { msg = SPREE_NAMES[killStreak]; col = '#ffd24a'; } // spree milestone wins
   if (msg) announce(msg, col);
   awardCoins(10); // coins toward unlocking classes
+  awardXp(25);    // career progress
   unlockAch('firstkill');
   if (killStreak >= 5) unlockAch('spree5');
 }
@@ -1538,19 +1676,22 @@ function makeFaceTexture() {
 let faceTex = null;
 
 const RANK_COL = { BRONZE: '#cd7f32', SILVER: '#c0c0c0', GOLD: '#ffd24a', PLATINUM: '#5fe0d0', DIAMOND: '#7dd3fc', MASTER: '#ff5cc8' };
-function makeNameSprite(name, team, tier) {
+function makeNameSprite(name, team, tier, title) {
   const c = document.createElement('canvas');
   const g = c.getContext('2d');
   g.font = '28px monospace';
-  const w = Math.max(64, g.measureText(name).width + 24);
-  const h = tier ? 66 : 44;
+  const w = Math.max(64, g.measureText(name).width + 24, title ? g.measureText(title).width + 20 : 0);
+  const topPad = (tier ? 22 : 0) + (title ? 20 : 0);
+  const h = 44 + topPad;
   c.width = w; c.height = h;
   const g2 = c.getContext('2d');
   g2.fillStyle = 'rgba(0,0,0,0.45)'; g2.fillRect(0, 0, w, h);
   g2.textAlign = 'center'; g2.textBaseline = 'middle';
-  if (tier) { g2.font = 'bold 18px monospace'; g2.fillStyle = RANK_COL[tier] || '#7dd3fc'; g2.fillText(tier, w / 2, 14); }
+  let y = 14;
+  if (title) { g2.font = 'bold 15px monospace'; g2.fillStyle = '#ffd24a'; g2.fillText(title, w / 2, y); y += 20; }
+  if (tier) { g2.font = 'bold 18px monospace'; g2.fillStyle = RANK_COL[tier] || '#7dd3fc'; g2.fillText(tier, w / 2, y); y += 22; }
   g2.font = 'bold 28px monospace'; g2.fillStyle = TEAM_COL[team];
-  g2.fillText(name, w / 2, tier ? 45 : 23);
+  g2.fillText(name, w / 2, h - 21);
   const t = new THREE.CanvasTexture(c);
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t }));
   sp.scale.set(w / 70, h / 70, 1);
@@ -1558,7 +1699,7 @@ function makeNameSprite(name, team, tier) {
   return sp;
 }
 
-function makeCharacter(team, name, agentId, color, tier) {
+function makeCharacter(team, name, agentId, color, tier, title) {
   const group = new THREE.Group();
   const accentCol = (typeof color === 'number' && color >= 0) ? color : (AGENTS[agentId]?.accent ?? 0x9aa4b2);
   const skin = new THREE.MeshLambertMaterial({ color: 0xd8a37a });
@@ -1595,15 +1736,15 @@ function makeCharacter(team, name, agentId, color, tier) {
   helmet.position.y = 1.92;
 
   [head, body, armL, armR, legL, legR, gun, helmet].forEach(o => { o.castShadow = true; group.add(o); });
-  const nameSprite = makeNameSprite(name, team, tier);
+  const nameSprite = makeNameSprite(name, team, tier, title);
   group.add(nameSprite);
-  group.userData = { head, armL, armR, legL, legR, gun, nameSprite, name, team };
+  group.userData = { head, armL, armR, legL, legR, gun, nameSprite, name, team, title, tier };
   return group;
 }
 
 function addRemote(p) {
   if (remotes.has(p.id)) return;
-  const group = makeCharacter(p.team, p.name, p.agent, p.color, p.rankTier);
+  const group = makeCharacter(p.team, p.name, p.agent, p.color, p.rankTier, p.title);
   group.position.set(p.pos.x, p.pos.y, p.pos.z);
   group.rotation.y = p.ry + Math.PI;
   group.visible = p.alive;

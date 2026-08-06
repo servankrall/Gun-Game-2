@@ -436,7 +436,7 @@ export class GameServer extends DurableObject {
 
   // ---- combatant helpers ----
   entities(r) { return [...r.clients.values()].map(c => c.player).concat([...r.bots.values()]); }
-  pub(p) { return { id: p.id, name: p.name, team: p.team, pos: p.pos, ry: p.ry, rx: p.rx, anim: p.anim, alive: p.alive, hp: p.hp, kills: p.kills, deaths: p.deaths, bot: !!p.bot, agent: p.agent || 'soldier', color: p.color, rankTier: p.rankTier }; }
+  pub(p) { return { id: p.id, name: p.name, team: p.team, pos: p.pos, ry: p.ry, rx: p.rx, anim: p.anim, alive: p.alive, hp: p.hp, kills: p.kills, deaths: p.deaths, bot: !!p.bot, agent: p.agent || 'soldier', color: p.color, rankTier: p.rankTier, title: p.title || null }; }
   count(r) { return r.clients.size + r.bots.size; }
   teamCount(r, team) { return this.entities(r).filter(e => e.team === team).length; }
   humanTeamCount(r, team) { return [...r.clients.values()].filter(c => c.player.team === team).length; }
@@ -467,6 +467,7 @@ export class GameServer extends DurableObject {
     const player = { id, name, team, pos, ry: ryFor(team), rx: 0, anim: 0, hp: 100, alive: true, kills: 0, deaths: 0, lastHit: 0, level: 0,
       acct: m.acct ? String(m.acct).toLowerCase().slice(0, 16) : null,
       color: (typeof m.color === 'number' && m.color >= 0 && m.color <= 0xffffff) ? (m.color | 0) : null,
+      title: m.title ? String(m.title).slice(0, 18) : null,
       agent, dmgTakenMult: AGENTS[agent].dmgTaken, regenMult: AGENTS[agent].regen };
     r.clients.set(id, { ws, player });
 
