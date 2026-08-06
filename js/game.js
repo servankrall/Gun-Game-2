@@ -344,10 +344,11 @@ function renderShop() {
     setPreviewSkin(selectedSkin); startPreview();
     renderSkinInfo();
     for (const id in SKINS) {
-      const s = SKINS[id], owned = skinUnlocked(id), equipped = equippedSkin === id, sel = selectedSkin === id;
-      h += `<div class="skin-card ${owned ? 'owned' : ''} ${equipped ? 'equipped' : ''} ${sel ? 'sel' : ''}" data-sel="${id}">
+      const s = SKINS[id], owned = skinUnlocked(id), equipped = equippedSkin === id, sel = selectedSkin === id, rar = skinRarity(id);
+      h += `<div class="skin-card ${owned ? 'owned' : ''} ${equipped ? 'equipped' : ''} ${sel ? 'sel' : ''}" data-sel="${id}" style="border-top:3px solid ${rar.color}">
         <div class="skin-sw"><span style="background:${hx(s.body)}"></span><span style="background:${hx(s.accent)}"></span><span class="tr" style="background:${hx(s.tracer)}"></span></div>
         <div class="skin-nm">${s.name}</div>
+        <div class="shop-src" style="color:${rar.color}">${rar.name}</div>
         <div class="shop-src">${s.tier > 0 ? 'Career Lv ' + s.tier : id === 'standard' ? 'Default' : COIN + s.cost}</div>
       </div>`;
     }
@@ -355,12 +356,25 @@ function renderShop() {
     box.querySelectorAll('[data-sel]').forEach(c => c.addEventListener('click', () => { selectedSkin = c.dataset.sel; renderShop(); }));
   }
 }
+function skinRarity(id) {
+  const s = SKINS[id]; if (!s) return { name: 'RARE', color: '#5ad1ff' };
+  if (id === 'standard') return { name: 'STANDARD', color: '#9fb0d0' };
+  if (id === 'dragon') return { name: 'EXOTIC', color: '#ff7a1a' };
+  if (s.tier > 0) return { name: 'CAREER', color: '#7be0a0' };
+  if (s.cost >= 1800) return { name: 'LEGENDARY', color: '#ffd24a' };
+  if (s.cost >= 1000) return { name: 'EPIC', color: '#c78bff' };
+  return { name: 'RARE', color: '#5ad1ff' };
+}
 function renderSkinInfo() {
   const info = $('skinInfo'); if (!info) return;
   const s = SKINS[selectedSkin]; const owned = skinUnlocked(selectedSkin), equipped = equippedSkin === selectedSkin;
-  info.innerHTML = `<div class="si-name">${s.name}</div>
+  const rar = skinRarity(selectedSkin);
+  const glow = GLOW_SKINS.has(selectedSkin) ? '<span class="si-tag">GLOW</span>' : '';
+  info.innerHTML = `<div class="si-rar" style="color:${rar.color};border-color:${rar.color}">${rar.name}</div>
+    <div class="si-name">${s.name}</div>
     <div class="si-src">${s.tier > 0 ? 'Career reward · Level ' + s.tier : selectedSkin === 'standard' ? 'Default finish' : 'Shop exclusive'}</div>
-    <div class="si-tr">TRACER <span style="background:${hx(s.tracer)}"></span></div>
+    <div class="si-tr">TRACER <span style="background:${hx(s.tracer)}"></span>${glow}</div>
+    <div class="si-hint">Press <b>Y</b> in-game to inspect</div>
     <div class="si-act">${actionBtn(owned, equipped, s.tier, s.cost, selectedSkin)}</div>`;
   info.querySelectorAll('[data-equip]').forEach(b => b.addEventListener('click', () => equipSkin(b.dataset.equip)));
   info.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => buySkin(b.dataset.buy)));
@@ -2629,6 +2643,26 @@ function updateViewModel(dt, moving) {
     const gi = 0.7 + Math.sin(performance.now() * 0.006) * 0.5;
     vm.mats.dark.emissiveIntensity = gi; vm.mats.dark2.emissiveIntensity = gi; vm.mats.wood.emissiveIntensity = gi;
   }
+  // weapon inspect animation (Y / F): lift and spin the gun to show off the skin
+  if (vm.inspectT > 0) {
+    vm.inspectT = Math.max(0, vm.inspectT - dt);
+    const p = 1 - vm.inspectT / INSPECT_DUR;      // 0 -> 1
+    const e = Math.sin(p * Math.PI);              // 0 -> 1 -> 0 envelope
+    vm.group.position.x += -0.14 * e;
+    vm.group.position.y += 0.07 * e;
+    vm.group.position.z += 0.12 * e;
+    vm.group.rotation.y += 1.7 * Math.sin(p * Math.PI * 2); // turn to the side and back
+    vm.group.rotation.z += 0.55 * e;
+    vm.group.rotation.x += -0.35 * e;
+  }
+}
+const INSPECT_DUR = 1.6;
+function startInspect() {
+  if (!vm || !vm.group || !inGame || me.dead || (typeof chatOpen !== 'undefined' && chatOpen)) return;
+  vm.inspectT = INSPECT_DUR;
+  const s = SKINS[equippedSkin], lbl = $('inspectLbl');
+  if (lbl && s) { lbl.textContent = s.name; lbl.style.opacity = '1'; clearTimeout(lbl._t); lbl._t = setTimeout(() => lbl.style.opacity = '0', 1600); }
+  try { tone(300, 0.05, 0.06, 'sine'); tone(460, 0.05, 0.05, 'sine'); } catch {}
 }
 
 function selectSlot(i) {
@@ -2873,6 +2907,7 @@ function setupInput() {
     if (e.code === 'KeyR') startReload();
     if (e.code === 'KeyG' && !e.repeat) throwGrenade();
     if (e.code === 'KeyB' && !e.repeat) deployTurret();
+    if ((e.code === 'KeyY' || e.code === 'KeyF') && !e.repeat) startInspect();
     if (/^Digit[1-9]$/.test(e.code)) {
       const n = parseInt(e.code[5]) - 1;
       if (gameMode === 'gg') { const v = [ggWeaponKey(), 'blocks']; if (n < v.length) selectSlot(SLOTS.indexOf(v[n])); }
