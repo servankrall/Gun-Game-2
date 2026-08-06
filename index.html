@@ -503,7 +503,28 @@
   .shopcat:hover { color: #fff; border-color: #4a6299; }
   .shopcat.active { color: #0c1122; background: linear-gradient(90deg,#ffd24a,#ffb14a); border-color: #ffd24a; }
   .shop-badge { font-size: 10px; letter-spacing: 1px; color: #0c1122; padding: 6px 10px; border-radius: 6px; }
-  .tracer-sw { width: 70%; height: 12px; border-radius: 6px; box-shadow: 0 0 12px currentColor, inset 0 0 0 1px rgba(0,0,0,.4); }
+
+  /* weapon-skin collection: live preview stage + selectable cards */
+  #skinStage { display: none; gap: 16px; align-items: stretch; }
+  #skinPreview { flex: 1 1 auto; width: 100%; max-width: 520px; height: 220px; border-radius: 12px;
+    background: radial-gradient(120% 120% at 50% 20%, #1a2740, #0a1120); border: 1px solid #2c405f; }
+  #skinInfo { flex: 0 0 190px; display: flex; flex-direction: column; justify-content: center; gap: 10px; padding: 10px 4px; }
+  #skinInfo .si-name { font-size: 15px; color: #fff; letter-spacing: 1px; text-shadow: 2px 2px 0 #000; }
+  #skinInfo .si-src { font-size: 8px; color: #9fb0d0; letter-spacing: .5px; }
+  #skinInfo .si-tr { font-size: 8px; color: #9fb0d0; display: flex; align-items: center; gap: 8px; letter-spacing: 1px; }
+  #skinInfo .si-tr span { width: 26px; height: 8px; border-radius: 4px; box-shadow: 0 0 10px currentColor; }
+  #skinInfo .si-act .shop-b { font-size: 10px; padding: 10px 14px; }
+  @media (max-width: 640px) { #skinStage { flex-direction: column; } #skinInfo { flex-basis: auto; } }
+  .skingrid, #shopPanel .shopgrid { }
+  .skin-card { border: 1px solid #293c5a; border-radius: 10px; padding: 10px 8px; text-align: center; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.01)); transition: transform .12s, border-color .15s; }
+  .skin-card:hover { transform: translateY(-3px); border-color: #4a6299; }
+  .skin-card.sel { border-color: #ffd24a; box-shadow: 0 0 16px rgba(255,210,74,.35); }
+  .skin-card.equipped { border-color: #49c26a; }
+  .skin-sw { display: flex; gap: 3px; }
+  .skin-sw span { width: 16px; height: 16px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.4); }
+  .skin-sw .tr { box-shadow: 0 0 8px currentColor, inset 0 0 0 1px rgba(0,0,0,.4); }
+  .skin-nm { font-size: 9px; color: #fff; letter-spacing: .5px; }
   .shop-card.equipped { position: relative; overflow: hidden; }
   .shop-card.equipped::after { content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%; transform: skewX(-20deg);
     background: linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent); animation: shimmer 2.6s ease-in-out infinite; }
@@ -633,12 +654,16 @@
     </div>
 
     <div id="shopPanel">
-      <div class="ltitle">COSMETICS <span class="asub">(equip titles &amp; tracer skins — visible in-game)</span></div>
+      <div class="ltitle">COSMETICS <span class="asub">(titles &amp; Valorant-style weapon skins — each skin brings its own tracer)</span></div>
       <div id="shopTabs">
         <button class="shopcat active" data-cat="titles">TITLES</button>
-        <button class="shopcat" data-cat="tracers">TRACERS</button>
+        <button class="shopcat" data-cat="skins">WEAPON SKINS</button>
       </div>
       <div class="shoptop"><button id="shopUnequip" class="shop-b">UNEQUIP</button><span id="shopMsg" class="amsg"></span></div>
+      <div id="skinStage">
+        <canvas id="skinPreview" width="440" height="240"></canvas>
+        <div id="skinInfo"></div>
+      </div>
       <div id="shopGrid" class="shopgrid"></div>
     </div>
 

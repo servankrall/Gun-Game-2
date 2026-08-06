@@ -503,7 +503,28 @@
   .shopcat:hover { color: #fff; border-color: #4a6299; }
   .shopcat.active { color: #0c1122; background: linear-gradient(90deg,#ffd24a,#ffb14a); border-color: #ffd24a; }
   .shop-badge { font-size: 10px; letter-spacing: 1px; color: #0c1122; padding: 6px 10px; border-radius: 6px; }
-  .tracer-sw { width: 70%; height: 12px; border-radius: 6px; box-shadow: 0 0 12px currentColor, inset 0 0 0 1px rgba(0,0,0,.4); }
+
+  /* weapon-skin collection: live preview stage + selectable cards */
+  #skinStage { display: none; gap: 16px; align-items: stretch; }
+  #skinPreview { flex: 1 1 auto; width: 100%; max-width: 520px; height: 220px; border-radius: 12px;
+    background: radial-gradient(120% 120% at 50% 20%, #1a2740, #0a1120); border: 1px solid #2c405f; }
+  #skinInfo { flex: 0 0 190px; display: flex; flex-direction: column; justify-content: center; gap: 10px; padding: 10px 4px; }
+  #skinInfo .si-name { font-size: 15px; color: #fff; letter-spacing: 1px; text-shadow: 2px 2px 0 #000; }
+  #skinInfo .si-src { font-size: 8px; color: #9fb0d0; letter-spacing: .5px; }
+  #skinInfo .si-tr { font-size: 8px; color: #9fb0d0; display: flex; align-items: center; gap: 8px; letter-spacing: 1px; }
+  #skinInfo .si-tr span { width: 26px; height: 8px; border-radius: 4px; box-shadow: 0 0 10px currentColor; }
+  #skinInfo .si-act .shop-b { font-size: 10px; padding: 10px 14px; }
+  @media (max-width: 640px) { #skinStage { flex-direction: column; } #skinInfo { flex-basis: auto; } }
+  .skingrid, #shopPanel .shopgrid { }
+  .skin-card { border: 1px solid #293c5a; border-radius: 10px; padding: 10px 8px; text-align: center; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.01)); transition: transform .12s, border-color .15s; }
+  .skin-card:hover { transform: translateY(-3px); border-color: #4a6299; }
+  .skin-card.sel { border-color: #ffd24a; box-shadow: 0 0 16px rgba(255,210,74,.35); }
+  .skin-card.equipped { border-color: #49c26a; }
+  .skin-sw { display: flex; gap: 3px; }
+  .skin-sw span { width: 16px; height: 16px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.4); }
+  .skin-sw .tr { box-shadow: 0 0 8px currentColor, inset 0 0 0 1px rgba(0,0,0,.4); }
+  .skin-nm { font-size: 9px; color: #fff; letter-spacing: .5px; }
   .shop-card.equipped { position: relative; overflow: hidden; }
   .shop-card.equipped::after { content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%; transform: skewX(-20deg);
     background: linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent); animation: shimmer 2.6s ease-in-out infinite; }
@@ -633,12 +654,16 @@
     </div>
 
     <div id="shopPanel">
-      <div class="ltitle">COSMETICS <span class="asub">(equip titles &amp; tracer skins — visible in-game)</span></div>
+      <div class="ltitle">COSMETICS <span class="asub">(titles &amp; Valorant-style weapon skins — each skin brings its own tracer)</span></div>
       <div id="shopTabs">
         <button class="shopcat active" data-cat="titles">TITLES</button>
-        <button class="shopcat" data-cat="tracers">TRACERS</button>
+        <button class="shopcat" data-cat="skins">WEAPON SKINS</button>
       </div>
       <div class="shoptop"><button id="shopUnequip" class="shop-b">UNEQUIP</button><span id="shopMsg" class="amsg"></span></div>
+      <div id="skinStage">
+        <canvas id="skinPreview" width="440" height="240"></canvas>
+        <div id="skinInfo"></div>
+      </div>
       <div id="shopGrid" class="shopgrid"></div>
     </div>
 
@@ -2211,30 +2236,40 @@ ownedTitles.add('none');
 let equippedTitle = localStorage.getItem('bf_title') || 'none';
 function saveTitles() { localStorage.setItem('bf_titles', JSON.stringify([...ownedTitles])); localStorage.setItem('bf_title', equippedTitle); }
 
-// Tracer (bullet) skins — colour your shots for everyone to see.
-const TRACERS = {
-  standard: { name: 'STANDARD', color: 0xffd080, tier: 0, cost: 0 },
-  ice:      { name: 'ICE', color: 0x9fe0ff, tier: 3, cost: 0 },
-  emerald:  { name: 'EMERALD', color: 0x6bffa0, tier: 8, cost: 0 },
-  crimson:  { name: 'CRIMSON', color: 0xff5a5a, tier: 14, cost: 0 },
-  amethyst: { name: 'AMETHYST', color: 0xb98bff, tier: 22, cost: 0 },
-  gold:     { name: 'GOLD', color: 0xffd24a, tier: 0, cost: 500 },
-  plasma:   { name: 'PLASMA', color: 0x35f0ff, tier: 0, cost: 900 },
-  neon:     { name: 'NEON PINK', color: 0xff4fd8, tier: 0, cost: 1300 },
-  voidfx:   { name: 'VOID', color: 0x8a4bff, tier: 0, cost: 2000 },
-  rainbow:  { name: 'RAINBOW', color: 0xffffff, tier: 0, cost: 3500, rainbow: true },
+// Weapon SKINS (Valorant-style finishes). Each skin recolours your gun and
+// bundles its own tracer colour — buying/equipping a skin applies both.
+const SKINS = {
+  standard:    { name: 'STANDARD',     body: 0x26262b, accent: 0x3a3a40, emissive: 0x000000, tracer: 0xffd080, tier: 0, cost: 0 },
+  recruit:     { name: 'RECRUIT',      body: 0x2b3550, accent: 0x4a6299, emissive: 0x0a1428, tracer: 0x9fe0ff, tier: 5, cost: 0 },
+  ranger:      { name: 'RANGER',       body: 0x223018, accent: 0x5a7a2a, emissive: 0x0a1405, tracer: 0x6bffa0, tier: 12, cost: 0 },
+  chronovoid:  { name: 'CHRONOVOID',   body: 0x141026, accent: 0x6a4bff, emissive: 0x1a0a4a, tracer: 0x8a4bff, tier: 20, cost: 0 },
+  radiant:     { name: 'RADIANT',      body: 0xf0e6c0, accent: 0xffd24a, emissive: 0x3a3010, tracer: 0xffd24a, tier: 40, cost: 0 },
+  prime:       { name: 'PRIME',        body: 0xdcc7a6, accent: 0xb9902f, emissive: 0x201800, tracer: 0x35f0ff, tier: 0, cost: 1000 },
+  neofrontier: { name: 'NEO FRONTIER', body: 0x0f2a2a, accent: 0x35f0c0, emissive: 0x0a3a30, tracer: 0x35f0c0, tier: 0, cost: 1200 },
+  kuronami:    { name: 'KURONAMI',     body: 0x121212, accent: 0x9a1018, emissive: 0x5a0a0a, tracer: 0xff3b3b, tier: 0, cost: 1500 },
+  sovereign:   { name: 'SOVEREIGN',    body: 0xe8e2cf, accent: 0xcaa64a, emissive: 0x2a2410, tracer: 0xffe08a, tier: 0, cost: 1800 },
+  oni:         { name: 'ONI',          body: 0x1a1030, accent: 0xc23bd6, emissive: 0x3a0a4a, tracer: 0xff4fd8, tier: 0, cost: 2000 },
+  glitchpop:   { name: 'GLITCHPOP',    body: 0x2a0a3a, accent: 0x35f0ff, emissive: 0x2a0a3a, tracer: 0xff4fd8, tier: 0, cost: 2400 },
+  dragon:      { name: 'ELDER DRAGON', body: 0x2a1206, accent: 0xff7a1a, emissive: 0x5a2600, tracer: 0xff7a1a, tier: 0, cost: 3200 },
 };
-let ownedTracers = (() => { try { const a = JSON.parse(localStorage.getItem('bf_tracers')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
-ownedTracers.add('standard');
-let equippedTracer = localStorage.getItem('bf_tracer') || 'standard';
-function saveTracers() { localStorage.setItem('bf_tracers', JSON.stringify([...ownedTracers])); localStorage.setItem('bf_tracer', equippedTracer); }
-function tracerUnlocked(id) { const t = TRACERS[id]; if (!t) return false; if (ownedTracers.has(id)) return true; return t.tier > 0 && careerLevel() >= t.tier; }
-// Effective tracer colour for one of MY shots (rainbow cycles over time).
+let ownedSkins = (() => { try { const a = JSON.parse(localStorage.getItem('bf_skins')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
+ownedSkins.add('standard');
+let equippedSkin = localStorage.getItem('bf_skin') || 'standard';
+function saveSkins() { localStorage.setItem('bf_skins', JSON.stringify([...ownedSkins])); localStorage.setItem('bf_skin', equippedSkin); }
+function skinUnlocked(id) { const s = SKINS[id]; if (!s) return false; if (ownedSkins.has(id)) return true; return s.tier > 0 && careerLevel() >= s.tier; }
+// Tracer colour comes from the equipped skin (bundled).
 function myTracerColor(wkey) {
-  const t = TRACERS[equippedTracer];
-  if (!t || equippedTracer === 'standard') return wkey === 'sniper' ? 0xaadfff : 0xffd080;
-  if (t.rainbow) { const c = new THREE.Color(); c.setHSL((performance.now() * 0.0004) % 1, 1, 0.6); return c.getHex(); }
-  return t.color;
+  const s = SKINS[equippedSkin];
+  if (!s || equippedSkin === 'standard') return wkey === 'sniper' ? 0xaadfff : 0xffd080;
+  return s.tracer;
+}
+// Recolour the first-person weapon materials to match the equipped skin.
+function applyWeaponSkin(id) {
+  const s = SKINS[id] || SKINS.standard;
+  if (!vm || !vm.mats) return;
+  vm.mats.dark.color.setHex(s.body); if (vm.mats.dark.emissive) vm.mats.dark.emissive.setHex(s.emissive);
+  vm.mats.dark2.color.setHex(s.accent); if (vm.mats.dark2.emissive) vm.mats.dark2.emissive.setHex(s.emissive);
+  vm.mats.wood.color.setHex(s.accent); if (vm.mats.wood.emissive) vm.mats.wood.emissive.setHex(s.emissive);
 }
 function titleUnlocked(id) { const t = TITLES[id]; if (!t) return false; if (ownedTitles.has(id)) return true; return t.tier > 0 && careerLevel() >= t.tier; }
 function titleText(id) { const t = TITLES[id]; return (t && id !== 'none') ? t.name : ''; }
@@ -2286,8 +2321,10 @@ function renderCareer() {
   // auto-scroll to current tier
   const curEl = box.querySelector('.ptier.cur'); if (curEl) curEl.scrollIntoView({ inline: 'center', block: 'nearest' });
 }
-// Cosmetics shop with two categories: titles + tracer skins.
+// Cosmetics shop: TITLES + Valorant-style WEAPON SKINS (with a live 3D preview).
 let shopCat = 'titles';
+let selectedSkin = equippedSkin;
+function hx(n) { return '#' + (n >>> 0).toString(16).padStart(6, '0'); }
 function actionBtn(owned, equipped, tier, cost, id) {
   if (equipped) return `<button class="shop-b eq" disabled>EQUIPPED</button>`;
   if (owned) return `<button class="shop-b" data-equip="${id}">EQUIP</button>`;
@@ -2297,8 +2334,10 @@ function actionBtn(owned, equipped, tier, cost, id) {
 function renderShop() {
   const box = $('shopGrid'); if (!box) return;
   document.querySelectorAll('#shopTabs .shopcat').forEach(t => t.classList.toggle('active', t.dataset.cat === shopCat));
+  const stage = $('skinStage');
   let h = '';
   if (shopCat === 'titles') {
+    if (stage) stage.style.display = 'none'; stopPreview();
     for (const id in TITLES) {
       if (id === 'none') continue;
       const t = TITLES[id], owned = titleUnlocked(id), equipped = equippedTitle === id;
@@ -2307,30 +2346,97 @@ function renderShop() {
         <div class="shop-src">${t.tier > 0 ? 'Career reward' : 'Shop exclusive'}</div>
         ${actionBtn(owned, equipped, t.tier, t.cost, id)}</div>`;
     }
-  } else {
-    for (const id in TRACERS) {
-      const t = TRACERS[id], owned = tracerUnlocked(id), equipped = equippedTracer === id;
-      const swatch = t.rainbow ? 'background:linear-gradient(90deg,#ff5a5a,#ffd24a,#6bffa0,#35f0ff,#b98bff)'
-        : `background:#${t.color.toString(16).padStart(6, '0')}`;
-      h += `<div class="shop-card ${owned ? 'owned' : ''} ${equipped ? 'equipped' : ''}">
-        <div class="tracer-sw" style="${swatch}"></div>
-        <div class="shop-title">${t.name}</div>
-        <div class="shop-src">${t.tier > 0 ? 'Career reward' : id === 'standard' ? 'Default' : 'Shop exclusive'}</div>
-        ${actionBtn(owned, equipped, t.tier, t.cost, id)}</div>`;
+    box.innerHTML = h;
+    box.querySelectorAll('[data-equip]').forEach(b => b.addEventListener('click', () => equipTitle(b.dataset.equip)));
+    box.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => buyTitle(b.dataset.buy)));
+    const none = $('shopUnequip'); if (none) { none.style.display = ''; none.onclick = () => equipTitle('none'); }
+  } else { // weapon skins
+    const none = $('shopUnequip'); if (none) none.style.display = 'none';
+    if (stage) stage.style.display = 'flex';
+    if (!SKINS[selectedSkin]) selectedSkin = equippedSkin;
+    setPreviewSkin(selectedSkin); startPreview();
+    renderSkinInfo();
+    for (const id in SKINS) {
+      const s = SKINS[id], owned = skinUnlocked(id), equipped = equippedSkin === id, sel = selectedSkin === id;
+      h += `<div class="skin-card ${owned ? 'owned' : ''} ${equipped ? 'equipped' : ''} ${sel ? 'sel' : ''}" data-sel="${id}">
+        <div class="skin-sw"><span style="background:${hx(s.body)}"></span><span style="background:${hx(s.accent)}"></span><span class="tr" style="background:${hx(s.tracer)}"></span></div>
+        <div class="skin-nm">${s.name}</div>
+        <div class="shop-src">${s.tier > 0 ? 'Career Lv ' + s.tier : id === 'standard' ? 'Default' : COIN + s.cost}</div>
+      </div>`;
     }
+    box.innerHTML = h;
+    box.querySelectorAll('[data-sel]').forEach(c => c.addEventListener('click', () => { selectedSkin = c.dataset.sel; renderShop(); }));
   }
-  box.innerHTML = h;
-  box.querySelectorAll('[data-equip]').forEach(b => b.addEventListener('click', () => shopCat === 'titles' ? equipTitle(b.dataset.equip) : equipTracer(b.dataset.equip)));
-  box.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => shopCat === 'titles' ? buyTitle(b.dataset.buy) : buyTracer(b.dataset.buy)));
-  const none = $('shopUnequip'); if (none) { none.style.display = shopCat === 'titles' ? '' : 'none'; none.onclick = () => equipTitle('none'); }
 }
-function equipTracer(id) { if (!tracerUnlocked(id)) return; equippedTracer = id; saveTracers(); renderShop(); }
-function buyTracer(id) {
-  const t = TRACERS[id]; if (!t || tracerUnlocked(id)) return;
-  if (coins < t.cost) { const m = $('shopMsg'); if (m) m.textContent = `Need ${t.cost} coins`; return; }
-  awardCoins(-t.cost); ownedTracers.add(id); saveTracers(); equipTracer(id);
-  const m = $('shopMsg'); if (m) m.textContent = `Unlocked ${t.name} tracer!`;
+function renderSkinInfo() {
+  const info = $('skinInfo'); if (!info) return;
+  const s = SKINS[selectedSkin]; const owned = skinUnlocked(selectedSkin), equipped = equippedSkin === selectedSkin;
+  info.innerHTML = `<div class="si-name">${s.name}</div>
+    <div class="si-src">${s.tier > 0 ? 'Career reward · Level ' + s.tier : selectedSkin === 'standard' ? 'Default finish' : 'Shop exclusive'}</div>
+    <div class="si-tr">TRACER <span style="background:${hx(s.tracer)}"></span></div>
+    <div class="si-act">${actionBtn(owned, equipped, s.tier, s.cost, selectedSkin)}</div>`;
+  info.querySelectorAll('[data-equip]').forEach(b => b.addEventListener('click', () => equipSkin(b.dataset.equip)));
+  info.querySelectorAll('[data-buy]').forEach(b => b.addEventListener('click', () => buySkin(b.dataset.buy)));
 }
+function equipSkin(id) {
+  if (!skinUnlocked(id)) return;
+  equippedSkin = id; selectedSkin = id; saveSkins(); applyWeaponSkin(id); renderShop();
+}
+function buySkin(id) {
+  const s = SKINS[id]; if (!s || skinUnlocked(id)) return;
+  if (coins < s.cost) { const m = $('shopMsg'); if (m) m.textContent = `Need ${s.cost} coins`; return; }
+  awardCoins(-s.cost); ownedSkins.add(id); saveSkins(); equipSkin(id);
+  const m = $('shopMsg'); if (m) m.textContent = `Unlocked ${s.name}!`;
+}
+
+// ---- Live 3D weapon preview (Valorant-style inspect) ----
+let pv = null;
+function makePreviewGun(s) {
+  const g = new THREE.Group();
+  const body = new THREE.MeshStandardMaterial({ color: s.body, emissive: s.emissive, metalness: 0.55, roughness: 0.45 });
+  const acc = new THREE.MeshStandardMaterial({ color: s.accent, emissive: s.emissive, metalness: 0.65, roughness: 0.35 });
+  const b = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.24, 1.05), body);
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.62), acc); barrel.position.set(0, 0.02, -0.8);
+  const tip = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.1), acc); tip.position.set(0, 0.02, -1.12);
+  const mag = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.32, 0.18), acc); mag.position.set(0.02, -0.26, -0.05);
+  const stock = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.34), body); stock.position.set(0, -0.02, 0.64);
+  const scope = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.24), acc); scope.position.set(0, 0.19, -0.08);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 0.12), body); grip.position.set(0, -0.2, 0.28);
+  g.add(b, barrel, tip, mag, stock, scope, grip);
+  g.rotation.y = -0.5;
+  return g;
+}
+function ensureSkinPreview() {
+  if (pv) return pv;
+  const canvas = document.getElementById('skinPreview'); if (!canvas || !window.THREE) return null;
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true }); } catch { return null; }
+  const w = canvas.clientWidth || 420, h = canvas.clientHeight || 240;
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(w, h, false);
+  const scene = new THREE.Scene();
+  const cam = new THREE.PerspectiveCamera(32, w / h, 0.1, 100); cam.position.set(0, 0.05, 2.5);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+  const dl = new THREE.DirectionalLight(0xffffff, 1.0); dl.position.set(2, 3, 2); scene.add(dl);
+  const dl2 = new THREE.DirectionalLight(0x88aaff, 0.5); dl2.position.set(-2, -1, -2); scene.add(dl2);
+  const holder = new THREE.Group(); scene.add(holder);
+  pv = { renderer, scene, cam, holder, gun: null, raf: 0, skin: null };
+  return pv;
+}
+function setPreviewSkin(id) {
+  const p = ensureSkinPreview(); if (!p) return;
+  if (p.skin === id && p.gun) return;
+  if (p.gun) { p.holder.remove(p.gun); p.gun.traverse(o => { o.geometry && o.geometry.dispose(); o.material && o.material.dispose(); }); }
+  p.gun = makePreviewGun(SKINS[id] || SKINS.standard); p.holder.add(p.gun); p.skin = id;
+}
+function previewLoop() {
+  if (!pv) return;
+  pv.raf = requestAnimationFrame(previewLoop);
+  if (pv.holder) pv.holder.rotation.y += 0.012;
+  pv.renderer.render(pv.scene, pv.cam);
+}
+function startPreview() { if (pv && !pv.raf) previewLoop(); }
+function stopPreview() { if (pv && pv.raf) { cancelAnimationFrame(pv.raf); pv.raf = 0; } }
 function equipTitle(id) {
   if (!titleUnlocked(id) && id !== 'none') return;
   equippedTitle = id; saveTitles(); renderShop(); updateProfileCard();
@@ -2718,7 +2824,7 @@ function setupMenu() {
   renderAchievements();
 
   // ---- career (battle pass) + cosmetics shop ----
-  const closeAllPanels = () => ['authPanel', 'friendsPanel', 'leaderPanel', 'awardsPanel', 'optPanel', 'careerPanel', 'shopPanel'].forEach(p => { const e = $(p); if (e) e.classList.remove('open'); });
+  const closeAllPanels = () => { ['authPanel', 'friendsPanel', 'leaderPanel', 'awardsPanel', 'optPanel', 'careerPanel', 'shopPanel'].forEach(p => { const e = $(p); if (e) e.classList.remove('open'); }); stopPreview(); };
   const togglePanel = id => { const el = $(id); const was = el.classList.contains('open'); closeAllPanels(); if (!was) el.classList.add('open'); };
   // route the existing link buttons through the exclusive toggler for a cleaner feel
   [['authBtn', 'authPanel', () => connectLobby()], ['friendsBtn', 'friendsPanel', () => { connectLobby(); requestPresence(); }],
@@ -4369,6 +4475,7 @@ function buildViewModels() {
   const dark2 = new THREE.MeshLambertMaterial({ color: 0x3a3a40 });
   const wood = new THREE.MeshLambertMaterial({ color: 0x6e4f2a });
   const hand = new THREE.MeshLambertMaterial({ color: 0xd8a37a });
+  vm.mats = { dark, dark2, wood }; // recoloured by the equipped weapon skin
 
   function gunBase() {
     const g = new THREE.Group();
@@ -4493,6 +4600,7 @@ function buildViewModels() {
   }
   for (const m of Object.values(vm.models)) { vm.group.add(m); m.visible = false; }
   vm.models[SLOTS[me.slot]].visible = true;
+  applyWeaponSkin(equippedSkin); // paint the guns with the player's equipped skin
 }
 
 function updateViewModel(dt, moving) {
