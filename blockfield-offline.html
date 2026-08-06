@@ -544,12 +544,35 @@
     background: linear-gradient(180deg, rgba(16,28,50,.9), rgba(10,18,36,.94)); border: 1px solid #2c405f; box-shadow: 0 18px 60px rgba(0,0,0,.5); backdrop-filter: blur(6px); }
   .ltitle, .atitle { text-transform: uppercase; }
   #coinBal { transition: transform .12s; }
+
+  /* =========================================================
+     MODAL SYSTEM — panels open centered over a dimmed backdrop
+     (fixes panels stacking under / overlapping the lobby).
+     ========================================================= */
+  #modalBackdrop { position: fixed; inset: 0; z-index: 118; background: rgba(3,6,12,.8); display: none; }
+  #modalBackdrop.on { display: block; animation: fadeIn .16s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  #modalClose { position: fixed; top: 16px; right: 18px; z-index: 141; width: 40px; height: 40px; display: none;
+    background: #14233d; color: #cfd6e6; border: 2px solid #2c405f; font-size: 15px; cursor: pointer; }
+  #modalClose.on { display: block; }
+  #modalClose:hover { background: #2a1420; color: #fff; border-color: #ff5a5a; }
+  #authPanel.open, #friendsPanel.open, #leaderPanel.open, #awardsPanel.open, #optPanel.open, #careerPanel.open, #shopPanel.open {
+    position: fixed; left: 50%; top: 52%; transform: translate(-50%, -50%);
+    z-index: 130; margin: 0; max-height: 86vh; overflow-y: auto; overflow-x: hidden;
+    animation: modalIn .2s ease-out; box-shadow: 0 24px 80px rgba(0,0,0,.6);
+  }
+  @keyframes modalIn { from { opacity: 0; transform: translate(-50%, -50%) scale(.96); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+  /* pixel-style scrollbars inside modals */
+  #careerPanel::-webkit-scrollbar, #shopPanel::-webkit-scrollbar, #authPanel::-webkit-scrollbar, #friendsPanel::-webkit-scrollbar, #leaderPanel::-webkit-scrollbar, #awardsPanel::-webkit-scrollbar, .shopgrid::-webkit-scrollbar { width: 10px; height: 10px; }
+  #careerPanel::-webkit-scrollbar-thumb, #shopPanel::-webkit-scrollbar-thumb, .shopgrid::-webkit-scrollbar-thumb { background: #2c405f; border: 2px solid #0c1730; }
 </style>
 <script>(function(){try{var t=false;try{t=window.self===window.top}catch(e){t=false}if(t){var u=new URL(location.href);if(u.searchParams.has('__raw')){u.searchParams.delete('__raw');location.replace(u.pathname+u.search+u.hash)}}}catch(e){}})()</script></head>
 <body>
   <canvas id="game"></canvas>
 
   <div id="menu">
+    <div id="modalBackdrop"></div>
+    <button id="modalClose" title="Close">✕</button>
     <div id="topbar">
       <div class="logo"><span class="lb1">BLOCK</span><span class="lb2">FIELD</span></div>
       <div id="navtabs">
@@ -2988,12 +3011,18 @@ function setupMenu() {
   renderAchievements();
 
   // ---- career (battle pass) + cosmetics shop ----
-  const closeAllPanels = () => { ['authPanel', 'friendsPanel', 'leaderPanel', 'awardsPanel', 'optPanel', 'careerPanel', 'shopPanel'].forEach(p => { const e = $(p); if (e) e.classList.remove('open'); }); stopPreview(); };
-  const togglePanel = id => { const el = $(id); const was = el.classList.contains('open'); closeAllPanels(); if (!was) el.classList.add('open'); };
-  // route the existing link buttons through the exclusive toggler for a cleaner feel
+  const PANELS = ['authPanel', 'friendsPanel', 'leaderPanel', 'awardsPanel', 'optPanel', 'careerPanel', 'shopPanel'];
+  const syncModal = () => { const on = PANELS.some(p => { const e = $(p); return e && e.classList.contains('open'); }); const bd = $('modalBackdrop'), cx = $('modalClose'); if (bd) bd.classList.toggle('on', on); if (cx) cx.classList.toggle('on', on); };
+  const closeAllPanels = () => { PANELS.forEach(p => { const e = $(p); if (e) e.classList.remove('open'); }); stopPreview(); syncModal(); };
+  const togglePanel = id => { const el = $(id); const was = el.classList.contains('open'); closeAllPanels(); if (!was) el.classList.add('open'); syncModal(); };
+  // route every panel button through the exclusive modal toggler (fixes overlap)
   [['authBtn', 'authPanel', () => connectLobby()], ['friendsBtn', 'friendsPanel', () => { connectLobby(); requestPresence(); }],
-   ['leaderBtn', 'leaderPanel', () => { connectLobby(); authSend({ t: 'leaderboard' }); }], ['awardsBtn', 'awardsPanel', () => renderAchievements()]]
+   ['leaderBtn', 'leaderPanel', () => { connectLobby(); authSend({ t: 'leaderboard' }); }], ['awardsBtn', 'awardsPanel', () => renderAchievements()],
+   ['optBtn', 'optPanel', () => {}]]
     .forEach(([b, p, fn]) => { const el = $(b); if (el) { const clone = el.cloneNode(true); el.replaceWith(clone); clone.addEventListener('click', () => { togglePanel(p); fn(); }); } });
+  const bd = $('modalBackdrop'); if (bd) bd.addEventListener('click', closeAllPanels);
+  const mcx = $('modalClose'); if (mcx) mcx.addEventListener('click', closeAllPanels);
+  document.addEventListener('keydown', e => { if (e.code === 'Escape' && !inGame) closeAllPanels(); });
   const careerBtn = $('careerBtn'); if (careerBtn) careerBtn.addEventListener('click', () => { togglePanel('careerPanel'); renderCareer(); });
   const shopBtn = $('shopBtn'); if (shopBtn) shopBtn.addEventListener('click', () => { togglePanel('shopPanel'); renderShop(); });
   document.querySelectorAll('#shopTabs .shopcat').forEach(t => t.addEventListener('click', () => { shopCat = t.dataset.cat; renderShop(); }));

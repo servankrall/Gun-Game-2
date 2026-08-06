@@ -917,12 +917,18 @@ function setupMenu() {
   renderAchievements();
 
   // ---- career (battle pass) + cosmetics shop ----
-  const closeAllPanels = () => { ['authPanel', 'friendsPanel', 'leaderPanel', 'awardsPanel', 'optPanel', 'careerPanel', 'shopPanel'].forEach(p => { const e = $(p); if (e) e.classList.remove('open'); }); stopPreview(); };
-  const togglePanel = id => { const el = $(id); const was = el.classList.contains('open'); closeAllPanels(); if (!was) el.classList.add('open'); };
-  // route the existing link buttons through the exclusive toggler for a cleaner feel
+  const PANELS = ['authPanel', 'friendsPanel', 'leaderPanel', 'awardsPanel', 'optPanel', 'careerPanel', 'shopPanel'];
+  const syncModal = () => { const on = PANELS.some(p => { const e = $(p); return e && e.classList.contains('open'); }); const bd = $('modalBackdrop'), cx = $('modalClose'); if (bd) bd.classList.toggle('on', on); if (cx) cx.classList.toggle('on', on); };
+  const closeAllPanels = () => { PANELS.forEach(p => { const e = $(p); if (e) e.classList.remove('open'); }); stopPreview(); syncModal(); };
+  const togglePanel = id => { const el = $(id); const was = el.classList.contains('open'); closeAllPanels(); if (!was) el.classList.add('open'); syncModal(); };
+  // route every panel button through the exclusive modal toggler (fixes overlap)
   [['authBtn', 'authPanel', () => connectLobby()], ['friendsBtn', 'friendsPanel', () => { connectLobby(); requestPresence(); }],
-   ['leaderBtn', 'leaderPanel', () => { connectLobby(); authSend({ t: 'leaderboard' }); }], ['awardsBtn', 'awardsPanel', () => renderAchievements()]]
+   ['leaderBtn', 'leaderPanel', () => { connectLobby(); authSend({ t: 'leaderboard' }); }], ['awardsBtn', 'awardsPanel', () => renderAchievements()],
+   ['optBtn', 'optPanel', () => {}]]
     .forEach(([b, p, fn]) => { const el = $(b); if (el) { const clone = el.cloneNode(true); el.replaceWith(clone); clone.addEventListener('click', () => { togglePanel(p); fn(); }); } });
+  const bd = $('modalBackdrop'); if (bd) bd.addEventListener('click', closeAllPanels);
+  const mcx = $('modalClose'); if (mcx) mcx.addEventListener('click', closeAllPanels);
+  document.addEventListener('keydown', e => { if (e.code === 'Escape' && !inGame) closeAllPanels(); });
   const careerBtn = $('careerBtn'); if (careerBtn) careerBtn.addEventListener('click', () => { togglePanel('careerPanel'); renderCareer(); });
   const shopBtn = $('shopBtn'); if (shopBtn) shopBtn.addEventListener('click', () => { togglePanel('shopPanel'); renderShop(); });
   document.querySelectorAll('#shopTabs .shopcat').forEach(t => t.addEventListener('click', () => { shopCat = t.dataset.cat; renderShop(); }));

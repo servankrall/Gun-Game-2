@@ -544,12 +544,35 @@
     background: linear-gradient(180deg, rgba(16,28,50,.9), rgba(10,18,36,.94)); border: 1px solid #2c405f; box-shadow: 0 18px 60px rgba(0,0,0,.5); backdrop-filter: blur(6px); }
   .ltitle, .atitle { text-transform: uppercase; }
   #coinBal { transition: transform .12s; }
+
+  /* =========================================================
+     MODAL SYSTEM — panels open centered over a dimmed backdrop
+     (fixes panels stacking under / overlapping the lobby).
+     ========================================================= */
+  #modalBackdrop { position: fixed; inset: 0; z-index: 118; background: rgba(3,6,12,.8); display: none; }
+  #modalBackdrop.on { display: block; animation: fadeIn .16s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  #modalClose { position: fixed; top: 16px; right: 18px; z-index: 141; width: 40px; height: 40px; display: none;
+    background: #14233d; color: #cfd6e6; border: 2px solid #2c405f; font-size: 15px; cursor: pointer; }
+  #modalClose.on { display: block; }
+  #modalClose:hover { background: #2a1420; color: #fff; border-color: #ff5a5a; }
+  #authPanel.open, #friendsPanel.open, #leaderPanel.open, #awardsPanel.open, #optPanel.open, #careerPanel.open, #shopPanel.open {
+    position: fixed; left: 50%; top: 52%; transform: translate(-50%, -50%);
+    z-index: 130; margin: 0; max-height: 86vh; overflow-y: auto; overflow-x: hidden;
+    animation: modalIn .2s ease-out; box-shadow: 0 24px 80px rgba(0,0,0,.6);
+  }
+  @keyframes modalIn { from { opacity: 0; transform: translate(-50%, -50%) scale(.96); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+  /* pixel-style scrollbars inside modals */
+  #careerPanel::-webkit-scrollbar, #shopPanel::-webkit-scrollbar, #authPanel::-webkit-scrollbar, #friendsPanel::-webkit-scrollbar, #leaderPanel::-webkit-scrollbar, #awardsPanel::-webkit-scrollbar, .shopgrid::-webkit-scrollbar { width: 10px; height: 10px; }
+  #careerPanel::-webkit-scrollbar-thumb, #shopPanel::-webkit-scrollbar-thumb, .shopgrid::-webkit-scrollbar-thumb { background: #2c405f; border: 2px solid #0c1730; }
 </style>
 <script>(function(){try{var t=false;try{t=window.self===window.top}catch(e){t=false}if(t){var u=new URL(location.href);if(u.searchParams.has('__raw')){u.searchParams.delete('__raw');location.replace(u.pathname+u.search+u.hash)}}}catch(e){}})()</script></head>
 <body>
   <canvas id="game"></canvas>
 
   <div id="menu">
+    <div id="modalBackdrop"></div>
+    <button id="modalClose" title="Close">✕</button>
     <div id="topbar">
       <div class="logo"><span class="lb1">BLOCK</span><span class="lb2">FIELD</span></div>
       <div id="navtabs">
