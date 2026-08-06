@@ -204,13 +204,56 @@ function myTracerColor(wkey) {
   if (!s || equippedSkin === 'standard') return wkey === 'sniper' ? 0xaadfff : 0xffd080;
   return s.tracer;
 }
-// Recolour the first-person weapon materials to match the equipped skin.
+// Each skin has a procedural surface pattern (not just a flat colour).
+const SKIN_PATTERN = {
+  standard: 'plain', recruit: 'camo', ranger: 'camo', chronovoid: 'hex', radiant: 'gold',
+  prime: 'plain', neofrontier: 'circuit', kuronami: 'wave', sovereign: 'gold', oni: 'scale',
+  glitchpop: 'glitch', dragon: 'scale',
+};
+const _skinTexCache = {};
+function makeSkinTexture(id) {
+  if (_skinTexCache[id]) return _skinTexCache[id];
+  const s = SKINS[id] || SKINS.standard, pat = SKIN_PATTERN[id] || 'plain';
+  const hx6 = n => '#' + (n >>> 0).toString(16).padStart(6, '0');
+  const body = hx6(s.body), acc = hx6(s.accent), tr = hx6(s.tracer);
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = body; g.fillRect(0, 0, 64, 64);
+  let x = (s.body ^ s.accent ^ 0x9e3779b1) >>> 0; const rnd = () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; };
+  if (pat === 'camo') {
+    g.fillStyle = acc; for (let i = 0; i < 24; i++) { g.beginPath(); g.arc(rnd() * 64, rnd() * 64, 4 + rnd() * 8, 0, 7); g.fill(); }
+    g.fillStyle = 'rgba(0,0,0,.28)'; for (let i = 0; i < 16; i++) { g.beginPath(); g.arc(rnd() * 64, rnd() * 64, 3 + rnd() * 6, 0, 7); g.fill(); }
+  } else if (pat === 'hex') {
+    g.strokeStyle = acc; g.lineWidth = 1.3; for (let y = 0; y < 64; y += 10) for (let px = 0; px < 64; px += 12) g.strokeRect(px + ((y / 10) % 2 ? 6 : 0), y, 10, 10);
+  } else if (pat === 'circuit') {
+    g.strokeStyle = acc; g.lineWidth = 1.3; for (let i = 0; i < 10; i++) { const y = rnd() * 64; g.beginPath(); g.moveTo(0, y); g.lineTo(64, y + (rnd() * 20 - 10)); g.stroke(); }
+    g.fillStyle = tr; for (let i = 0; i < 14; i++) g.fillRect(rnd() * 62, rnd() * 62, 3, 3);
+  } else if (pat === 'glitch') {
+    const cols = [acc, tr, body]; for (let i = 0; i < 64; i++) { g.fillStyle = cols[Math.floor(rnd() * 3)]; g.fillRect(Math.floor(rnd() * 8) * 8, Math.floor(rnd() * 16) * 4, 8, 4); }
+  } else if (pat === 'scale') {
+    g.strokeStyle = 'rgba(0,0,0,.35)'; for (let y = 0; y < 64; y += 8) for (let px = 0; px < 64; px += 10) { const ox = (y / 8) % 2 ? 5 : 0; g.fillStyle = acc; g.beginPath(); g.arc(px + ox, y + 8, 6, Math.PI, 0); g.fill(); g.stroke(); }
+  } else if (pat === 'wave') {
+    for (let y = 0; y < 64; y += 6) { g.fillStyle = (y / 6) % 2 ? acc : body; g.beginPath(); g.moveTo(0, y); for (let px = 0; px <= 64; px += 8) g.lineTo(px, y + Math.sin(px / 8 + y) * 2); g.lineTo(64, y + 6); g.lineTo(0, y + 6); g.fill(); }
+  } else if (pat === 'gold') {
+    for (let i = -64; i < 64; i += 8) { g.strokeStyle = (i % 16) ? acc : 'rgba(255,255,255,.55)'; g.lineWidth = 3; g.beginPath(); g.moveTo(i, 0); g.lineTo(i + 64, 64); g.stroke(); }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter;
+  if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+  _skinTexCache[id] = tex; return tex;
+}
+// Recolour + texture the first-person weapon materials to match the equipped skin.
 function applyWeaponSkin(id) {
   const s = SKINS[id] || SKINS.standard;
   if (!vm || !vm.mats) return;
-  vm.mats.dark.color.setHex(s.body); if (vm.mats.dark.emissive) vm.mats.dark.emissive.setHex(s.emissive);
-  vm.mats.dark2.color.setHex(s.accent); if (vm.mats.dark2.emissive) vm.mats.dark2.emissive.setHex(s.emissive);
-  vm.mats.wood.color.setHex(s.accent); if (vm.mats.wood.emissive) vm.mats.wood.emissive.setHex(s.emissive);
+  const tex = id === 'standard' ? null : makeSkinTexture(id);
+  const parts = [['dark', s.body], ['dark2', s.accent], ['wood', s.accent]];
+  for (const [key, col] of parts) {
+    const m = vm.mats[key]; if (!m) continue;
+    m.color.setHex(tex ? 0xffffff : col); // map multiplies colour, so go white under a texture
+    if (m.emissive) m.emissive.setHex(s.emissive);
+    m.map = tex; m.needsUpdate = true;
+  }
 }
 function titleUnlocked(id) { const t = TITLES[id]; if (!t) return false; if (ownedTitles.has(id)) return true; return t.tier > 0 && careerLevel() >= t.tier; }
 function titleText(id) { const t = TITLES[id]; return (t && id !== 'none') ? t.name : ''; }
@@ -332,10 +375,12 @@ function buySkin(id) {
 
 // ---- Live 3D weapon preview (Valorant-style inspect) ----
 let pv = null;
-function makePreviewGun(s) {
+function makePreviewGun(id) {
+  const s = SKINS[id] || SKINS.standard;
+  const tex = id === 'standard' ? null : makeSkinTexture(id);
   const g = new THREE.Group();
-  const body = new THREE.MeshStandardMaterial({ color: s.body, emissive: s.emissive, metalness: 0.55, roughness: 0.45 });
-  const acc = new THREE.MeshStandardMaterial({ color: s.accent, emissive: s.emissive, metalness: 0.65, roughness: 0.35 });
+  const body = new THREE.MeshStandardMaterial({ color: tex ? 0xffffff : s.body, map: tex, emissive: s.emissive, metalness: 0.55, roughness: 0.45 });
+  const acc = new THREE.MeshStandardMaterial({ color: tex ? 0xffffff : s.accent, map: tex, emissive: s.emissive, metalness: 0.65, roughness: 0.35 });
   const b = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.24, 1.05), body);
   const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.62), acc); barrel.position.set(0, 0.02, -0.8);
   const tip = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, 0.1), acc); tip.position.set(0, 0.02, -1.12);
@@ -368,7 +413,7 @@ function setPreviewSkin(id) {
   const p = ensureSkinPreview(); if (!p) return;
   if (p.skin === id && p.gun) return;
   if (p.gun) { p.holder.remove(p.gun); p.gun.traverse(o => { o.geometry && o.geometry.dispose(); o.material && o.material.dispose(); }); }
-  p.gun = makePreviewGun(SKINS[id] || SKINS.standard); p.holder.add(p.gun); p.skin = id;
+  p.gun = makePreviewGun(id); p.holder.add(p.gun); p.skin = id;
 }
 function previewLoop() {
   if (!pv) return;
