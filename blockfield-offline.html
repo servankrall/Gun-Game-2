@@ -2450,6 +2450,11 @@ const SKINS = {
   cyber:       { name: 'CYBERPUNK',    body: 0x120a2a, accent: 0x2affea, emissive: 0x2a0a3a, tracer: 0xff3ea8, tier: 0, cost: 2600 },
   dragon:      { name: 'ELDER DRAGON', body: 0x2a1206, accent: 0xff7a1a, emissive: 0x5a2600, tracer: 0xff7a1a, tier: 0, cost: 3200 },
   mythicgun:   { name: 'MYTHIC',       body: 0xf0e6c0, accent: 0xffd24a, emissive: 0x4a3a10, tracer: 0xffd24a, tier: 45, cost: 0 },
+  abyss:       { name: 'ABYSSAL',      body: 0x061420, accent: 0x1fd0e0, emissive: 0x083040, tracer: 0x2affea, tier: 0, cost: 2000 },
+  sakura:      { name: 'SAKURA',       body: 0x2a1220, accent: 0xff8ac0, emissive: 0x3a1030, tracer: 0xff9ad0, tier: 0, cost: 1600 },
+  bumblebee:   { name: 'BUMBLEBEE',    body: 0x1a1606, accent: 0xffd21a, emissive: 0x2a2200, tracer: 0xffe04a, tier: 0, cost: 1400 },
+  wraith:      { name: 'WRAITH',       body: 0x0c0c12, accent: 0x7a3bff, emissive: 0x1a0a3a, tracer: 0xb04fff, tier: 0, cost: 2800 },
+  goldrush:    { name: 'GOLD RUSH',    body: 0x3a2c08, accent: 0xffe066, emissive: 0x4a3a10, tracer: 0xffe066, tier: 0, cost: 3600 },
 };
 let ownedSkins = (() => { try { const a = JSON.parse(localStorage.getItem('bf_skins')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
 ownedSkins.add('standard');
@@ -2493,9 +2498,10 @@ const SKIN_PATTERN = {
   prime: 'plain', neofrontier: 'circuit', kuronami: 'wave', sovereign: 'gold', oni: 'scale',
   glitchpop: 'glitch', dragon: 'scale', arctic: 'hex', toxic: 'camo', molten: 'wave',
   cyber: 'circuit', mythicgun: 'gold',
+  abyss: 'wave', sakura: 'scale', bumblebee: 'hex', wraith: 'glitch', goldrush: 'gold',
 };
 // Premium skins pulse an animated glow in-game and in the preview.
-const GLOW_SKINS = new Set(['chronovoid', 'radiant', 'neofrontier', 'oni', 'glitchpop', 'dragon', 'toxic', 'molten', 'cyber', 'mythicgun']);
+const GLOW_SKINS = new Set(['chronovoid', 'radiant', 'neofrontier', 'oni', 'glitchpop', 'dragon', 'toxic', 'molten', 'cyber', 'mythicgun', 'abyss', 'wraith', 'goldrush']);
 const _skinTexCache = {};
 function makeSkinTexture(id) {
   if (_skinTexCache[id]) return _skinTexCache[id];
@@ -2690,7 +2696,7 @@ function buyChar(id) {
 function skinRarity(id) {
   const s = SKINS[id]; if (!s) return { name: 'RARE', color: '#5ad1ff' };
   if (id === 'standard') return { name: 'STANDARD', color: '#9fb0d0' };
-  if (id === 'dragon' || id === 'mythicgun') return { name: 'EXOTIC', color: '#ff7a1a' };
+  if (id === 'dragon' || id === 'mythicgun' || id === 'goldrush' || id === 'wraith') return { name: 'EXOTIC', color: '#ff7a1a' };
   if (s.tier > 0) return { name: 'CAREER', color: '#7be0a0' };
   if (s.cost >= 1800) return { name: 'LEGENDARY', color: '#ffd24a' };
   if (s.cost >= 1000) return { name: 'EPIC', color: '#c78bff' };
