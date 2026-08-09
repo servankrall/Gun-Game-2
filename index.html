@@ -536,6 +536,7 @@
     text-shadow: 2px 2px 0 #000; opacity: 0; transition: opacity .3s; pointer-events: none; }
   #killFlash { position: absolute; inset: 0; pointer-events: none; opacity: 0; mix-blend-mode: screen; transition: opacity .12s ease-out; z-index: 3;
     background: radial-gradient(ellipse 90% 70% at 50% 50%, transparent 40%, currentColor 130%); }
+  #flashBlind { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: #fff; z-index: 90; }
   .shop-card.equipped { position: relative; overflow: hidden; }
   .shop-card.equipped::after { content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%; transform: skewX(-20deg);
     background: linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent); animation: shimmer 2.6s ease-in-out infinite; }
@@ -558,12 +559,19 @@
     background: #14233d; color: #cfd6e6; border: 2px solid #2c405f; font-size: 15px; cursor: pointer; }
   #modalClose.on { display: block; }
   #modalClose:hover { background: #2a1420; color: #fff; border-color: #ff5a5a; }
-  #authPanel.open, #friendsPanel.open, #leaderPanel.open, #awardsPanel.open, #optPanel.open, #careerPanel.open, #shopPanel.open {
+  #authPanel.open, #friendsPanel.open, #leaderPanel.open, #awardsPanel.open, #optPanel.open {
     position: fixed; left: 50%; top: 52%; transform: translate(-50%, -50%);
     z-index: 130; margin: 0; max-height: 86vh; overflow-y: auto; overflow-x: hidden;
     animation: modalIn .2s ease-out; box-shadow: 0 24px 80px rgba(0,0,0,.6);
   }
   @keyframes modalIn { from { opacity: 0; transform: translate(-50%, -50%) scale(.96); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+  /* big panels (career + cosmetics) open as a full-screen PAGE in front of you */
+  #careerPanel.open, #shopPanel.open {
+    position: fixed; inset: 3vh 3vw; left: 3vw; top: 3vh; transform: none;
+    z-index: 130; margin: 0; width: auto; max-width: none; height: auto; max-height: none;
+    overflow-y: auto; overflow-x: hidden; animation: pageIn .22s ease-out; box-shadow: 0 24px 90px rgba(0,0,0,.7);
+  }
+  @keyframes pageIn { from { opacity: 0; transform: scale(.985); } to { opacity: 1; transform: scale(1); } }
   /* pixel-style scrollbars inside modals */
   #careerPanel::-webkit-scrollbar, #shopPanel::-webkit-scrollbar, #authPanel::-webkit-scrollbar, #friendsPanel::-webkit-scrollbar, #leaderPanel::-webkit-scrollbar, #awardsPanel::-webkit-scrollbar, .shopgrid::-webkit-scrollbar { width: 10px; height: 10px; }
   #careerPanel::-webkit-scrollbar-thumb, #shopPanel::-webkit-scrollbar-thumb, .shopgrid::-webkit-scrollbar-thumb { background: #2c405f; border: 2px solid #0c1730; }
@@ -742,6 +750,7 @@
     <div id="turretHud"></div>
     <div id="inspectLbl"></div>
     <div id="killFlash"></div>
+    <div id="flashBlind"></div>
     <div id="zoneHud"><span id="zoneTxt"></span><div id="zoneBarWrap"><div id="zoneBar"></div></div></div>
     <div id="waveHud"></div>
     <div id="announce"></div>

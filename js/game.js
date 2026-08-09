@@ -51,6 +51,7 @@ const me = {
   ammo: { rifle: 30, smg: 28, shotgun: 6, sniper: 5, lmg: 60, pistol: 12, bazooka: 1 },
   blocks: 64,
   nades: 3,
+  flashes: 2, smokes: 2,
   reloading: false, reloadEnd: 0,
   lastShot: 0, lastNade: 0,
   zoomed: false,
@@ -1264,7 +1265,7 @@ function handleMsg(m) {
       }
       break;
     }
-    case 'supply': { me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.blocks = AGENTS[myAgent]?.blocks || 64; updateAmmoHud(); updateHotbar(); SND.spawn(); announce('SUPPLIES!', '#7dd3fc'); break; }
+    case 'supply': { me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.blocks = AGENTS[myAgent]?.blocks || 64; me.flashes = 2; me.smokes = 2; updateAmmoHud(); updateHotbar(); SND.spawn(); announce('SUPPLIES!', '#7dd3fc'); break; }
     case 'flag': {
       const tn = m.team === 'red' ? 'Red' : 'Blue';
       if (m.ev === 'pickup') { feed(`${m.name || 'Someone'} grabbed the ${tn} flag!`, m.team); SND.spawn(); }
@@ -1428,7 +1429,7 @@ function handleMsg(m) {
         me.vel.set(0, 0, 0);
         me.hp = 100; me.dead = false; me.shieldUntil = 0;
         me.ammo = { rifle: 30, smg: 28, shotgun: 6, sniper: 5, lmg: 60, pistol: 12, bazooka: 1 };
-        me.blocks = AGENTS[myAgent]?.blocks || 64; me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.reloading = false;
+        me.blocks = AGENTS[myAgent]?.blocks || 64; me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.flashes = 2; me.smokes = 2; me.reloading = false;
         me.ry = myTeam === 'red' ? -Math.PI / 2 : Math.PI / 2; me.rx = 0;
         updateHearts(); updateAmmoHud(); updateHotbar();
         if (gameMode === 'gg') applyGunGameWeapon();
@@ -1456,7 +1457,7 @@ function handleMsg(m) {
       break;
     case 'nade':
       spawnGrenade(new THREE.Vector3(m.from.x, m.from.y, m.from.z),
-                   new THREE.Vector3(m.vel.x, m.vel.y, m.vel.z), false);
+                   new THREE.Vector3(m.vel.x, m.vel.y, m.vel.z), false, m.kind || 'frag');
       break;
     case 'rtc':
       handleRtcSignal(m.from, m.data);
@@ -2480,23 +2481,41 @@ function explode(r) {
 // ============================================================
 const GR_FUSE = 1.5, GR_BLAST_R = 5, GR_BLOCK_R = 2, GR_DMG = 95;
 
-function spawnGrenade(pos, vel, isLocal) {
-  const obj = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.24), new THREE.MeshLambertMaterial({ color: 0x2f7d32 }));
+const NADE_COL = { frag: 0x2f7d32, flash: 0xf2f0d8, smoke: 0x8a8f98 };
+function spawnGrenade(pos, vel, isLocal, kind) {
+  kind = kind || 'frag';
+  const obj = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.24), new THREE.MeshLambertMaterial({ color: NADE_COL[kind] || NADE_COL.frag }));
   obj.position.copy(pos); obj.castShadow = true;
   scene.add(obj);
-  grenades.push({ obj, pos: pos.clone(), vel: vel.clone(), fuse: GR_FUSE, isLocal });
+  grenades.push({ obj, pos: pos.clone(), vel: vel.clone(), fuse: kind === 'flash' ? 1.2 : GR_FUSE, isLocal, kind });
 }
-
+function lobFrom() {
+  const origin = camera.getWorldPosition(new THREE.Vector3());
+  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
+  const vel = dir.clone().multiplyScalar(17); vel.y += 4.5;
+  return { from: origin.clone().addScaledVector(dir, 0.6), vel };
+}
 function throwGrenade() {
   const now = performance.now();
   if (me.dead || me.nades <= 0 || now - me.lastNade < 650) return;
   me.lastNade = now; me.nades--;
-  const origin = camera.getWorldPosition(new THREE.Vector3());
-  const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
-  const vel = dir.clone().multiplyScalar(17); vel.y += 4.5; // lob it in an arc
-  const from = origin.clone().addScaledVector(dir, 0.6);
-  spawnGrenade(from, vel, true);
-  netSend({ t: 'nade', from: { x: from.x, y: from.y, z: from.z }, vel: { x: vel.x, y: vel.y, z: vel.z } });
+  const { from, vel } = lobFrom();
+  spawnGrenade(from, vel, true, 'frag');
+  netSend({ t: 'nade', from: { x: from.x, y: from.y, z: from.z }, vel: { x: vel.x, y: vel.y, z: vel.z }, kind: 'frag' });
+  SND.nade();
+  updateAmmoHud();
+}
+// Flash (blinds anyone looking at it) + Smoke (concealment cloud) throwables.
+function throwUtility(kind) {
+  const now = performance.now();
+  if (me.dead || now - me.lastNade < 500) return;
+  if (kind === 'flash' && me.flashes <= 0) { feed('No flashbangs left', myTeam); return; }
+  if (kind === 'smoke' && me.smokes <= 0) { feed('No smokes left', myTeam); return; }
+  me.lastNade = now;
+  if (kind === 'flash') me.flashes--; else me.smokes--;
+  const { from, vel } = lobFrom();
+  spawnGrenade(from, vel, true, kind);
+  netSend({ t: 'nade', from: { x: from.x, y: from.y, z: from.z }, vel: { x: vel.x, y: vel.y, z: vel.z }, kind });
   SND.nade();
   updateAmmoHud();
 }
@@ -2518,7 +2537,12 @@ function updateGrenades(dt) {
     if (g.pos.y < 0.2) { g.pos.y = 0.2; g.vel.y *= -0.35; g.vel.x *= 0.7; g.vel.z *= 0.7; }
     g.obj.position.copy(g.pos);
     g.obj.rotation.x += dt * 6; g.obj.rotation.y += dt * 4;
-    if (g.fuse <= 0) { explodeGrenade(g.pos, g.isLocal); scene.remove(g.obj); grenades.splice(i, 1); }
+    if (g.fuse <= 0) {
+      if (g.kind === 'flash') flashDetonate(g.pos);
+      else if (g.kind === 'smoke') spawnSmoke(g.pos);
+      else explodeGrenade(g.pos, g.isLocal);
+      scene.remove(g.obj); grenades.splice(i, 1);
+    }
   }
 }
 
@@ -2547,6 +2571,57 @@ function explodeGrenade(p, isLocal) {
         removeBlockLocal(x, y, z, true);
         netSend({ t: 'destroy', x, y, z });
       }
+}
+
+// ---- Flashbang: blinds anyone with line-of-sight who's looking at it ----
+function flashDetonate(pos) {
+  burst(pos, 0xffffff, 22, 8); burst(pos, 0xfff2a8, 10, 5);
+  const dist = pos.distanceTo(me.pos);
+  SND.spawn();
+  if (me.dead || dist > 24) return;
+  const eye = camera.getWorldPosition(new THREE.Vector3());
+  const toFlash = pos.clone().sub(eye); const d = toFlash.length(); if (d < 0.01) { applyFlash(1); return; }
+  toFlash.normalize();
+  const view = new THREE.Vector3(); camera.getWorldDirection(view);
+  const facing = view.dot(toFlash); // 1 = staring right at it
+  if (raycastVoxels(eye, toFlash, d - 0.4)) return; // wall between you and the flash
+  let inten = 0;
+  if (facing > 0.15) inten = facing * (1 - dist / 28);
+  else if (dist < 7) inten = 0.4 * (1 - dist / 7); // point-blank still stings
+  inten = Math.max(0, Math.min(1, inten));
+  if (inten > 0.04) applyFlash(inten);
+}
+function applyFlash(inten) {
+  const el = $('flashBlind'); if (!el) return;
+  el.style.transition = 'none'; el.style.opacity = String(0.55 + inten * 0.45);
+  const dur = Math.round(700 + inten * 2600);
+  requestAnimationFrame(() => { el.style.transition = `opacity ${dur}ms ease-out`; el.style.opacity = '0'; });
+}
+// ---- Smoke cloud: soft concealment for ~11s ----
+const smokes = [];
+function spawnSmoke(pos) {
+  const grp = new THREE.Group(); const puffs = [];
+  for (let i = 0; i < 14; i++) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.9 + Math.random() * 0.6, 6, 6),
+      new THREE.MeshLambertMaterial({ color: 0x9aa0a8, transparent: true, opacity: 0, depthWrite: false }));
+    m.position.set((Math.random() - 0.5) * 2.6, 0.4 + Math.random() * 1.9, (Math.random() - 0.5) * 2.6);
+    grp.add(m); puffs.push(m);
+  }
+  grp.position.set(pos.x, Math.max(1, pos.y), pos.z);
+  scene.add(grp); smokes.push({ grp, puffs, t: 0, life: 11 });
+  SND.nade();
+}
+function updateSmoke(dt) {
+  for (let i = smokes.length - 1; i >= 0; i--) {
+    const s = smokes[i]; s.t += dt;
+    const inA = Math.min(1, s.t / 0.7);
+    const outA = s.t > s.life - 2 ? Math.max(0, 1 - (s.t - (s.life - 2)) / 2) : 1;
+    const op = 0.6 * inA * outA;
+    const sc = 0.4 + Math.min(1, s.t / 1.2) * 0.75;
+    s.grp.scale.setScalar(sc);
+    for (const p of s.puffs) { p.material.opacity = op; p.rotation.y += dt * 0.2; }
+    if (s.t >= s.life) { scene.remove(s.grp); s.puffs.forEach(p => { p.geometry.dispose(); p.material.dispose(); }); smokes.splice(i, 1); }
+  }
 }
 
 // ============================================================
@@ -2985,7 +3060,7 @@ function updateAmmoHud() {
   const w = WEAPONS[wkey];
   $('weaponName').textContent = w.name;
   $('ammoNum').textContent = w.builder ? `${me.blocks}` : w.tool ? '—' : `${me.ammo[wkey]} / ${w.mag}`;
-  const nh = $('nadeHud'); if (nh) nh.innerHTML = `NADE x${me.nades} <span style="color:#888">[G]</span>`;
+  const nh = $('nadeHud'); if (nh) nh.innerHTML = `NADE x${me.nades} <span style="color:#888">[G]</span> &nbsp; FLASH x${me.flashes} <span style="color:#888">[X]</span> &nbsp; SMOKE x${me.smokes} <span style="color:#888">[C]</span>`;
 }
 
 function feed(text, teamA, teamB) {
@@ -3051,6 +3126,8 @@ function setupInput() {
     if (e.code === 'Tab') { e.preventDefault(); tabHeld = true; updateScoreboard(); }
     if (e.code === 'KeyR') startReload();
     if (e.code === 'KeyG' && !e.repeat) throwGrenade();
+    if (e.code === 'KeyX' && !e.repeat) throwUtility('flash');
+    if (e.code === 'KeyC' && !e.repeat) throwUtility('smoke');
     if (e.code === 'KeyB' && !e.repeat) deployTurret();
     if ((e.code === 'KeyY' || e.code === 'KeyF') && !e.repeat) startInspect();
     if (/^Digit[1-9]$/.test(e.code)) {
@@ -3392,6 +3469,7 @@ function loop() {
     updateRemotes(dt);
     updateRockets(dt);
     updateGrenades(dt);
+    updateSmoke(dt);
     updatePickups(dt);
     updateFx(dt);
     updateViewModel(dt, moving > 0);
