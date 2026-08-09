@@ -148,6 +148,10 @@ const CFG = {
   survWaves: 8,            // Survival: clear this many waves to win
   survTeammates: 3,        // Survival: friendly AI bots fighting alongside you
   survZombieCap: 8,        // Survival: max raiders alive in one wave
+  buyTime: 15000,          // Rounds: freeze/buy phase length (ms)
+  roundOver: 5000,         // Rounds: pause between rounds (ms)
+  roundTime: 100000,       // Rounds: max live-phase length before it's decided on numbers
+  roundLimit: 7,           // Rounds: round wins needed to take the match
   turretRange: 18,         // Sentry turret target range
   turretDmg: 11,           // Sentry turret damage per shot
   turretRate: 480,         // ms between turret shots
@@ -459,6 +463,7 @@ export class GameServer extends DurableObject {
       else if (m.mode === 'gg') { r.mode = 'gg'; }
       else if (m.mode === 'dom') { r.mode = 'dom'; r.zone = { owner: null, cap: 0, capTeam: null, accum: 0, contested: false }; }
       else if (m.mode === 'surv') { r.mode = 'surv'; r.wave = 0; r.waveState = 'prep'; r.nextWaveAt = Date.now() + 4000; }
+      else if (m.mode === 'rounds') { r.mode = 'rounds'; r.round = 1; r.phase = 'buy'; r.phaseEnd = Date.now() + CFG.buyTime; }
     }
     const team = r.mode === 'surv' ? 'red' : this.pickTeam(r); // survivors are all one team
     const name = String(m.name || 'Player').slice(0, 16) || 'Player';
@@ -474,7 +479,8 @@ export class GameServer extends DurableObject {
 
     this.send(ws, {
       t: 'welcome', id, team, pos, ry: player.ry, scores: r.scores, room: roomId, count: this.count(r),
-      mode: r.mode, map: r.map, limit: r.mode === 'ctf' ? CFG.captureLimit : r.mode === 'gg' ? GG_LADDER.length : r.mode === 'dom' ? CFG.domLimit : r.mode === 'surv' ? CFG.survWaves : CFG.scoreLimit,
+      mode: r.mode, map: r.map, limit: r.mode === 'ctf' ? CFG.captureLimit : r.mode === 'gg' ? GG_LADDER.length : r.mode === 'dom' ? CFG.domLimit : r.mode === 'surv' ? CFG.survWaves : r.mode === 'rounds' ? CFG.roundLimit : CFG.scoreLimit,
+      round: r.mode === 'rounds' ? this.roundPub(r) : undefined,
       flags: r.flags ? this.flagPub(r) : undefined,
       zone: r.mode === 'dom' && r.zone ? this.zonePub(r) : undefined,
       wave: r.mode === 'surv' ? r.wave : undefined,
@@ -531,6 +537,13 @@ export class GameServer extends DurableObject {
         break;
       }
       case 'deploy': this.deployTurret(r, p, m); break;
+      case 'buy': { // Rounds: buy armour during the buy phase
+        if (r.mode === 'rounds' && r.phase === 'buy') {
+          const A = { none: 0, weak: 50, medium: 100, strong: 150 };
+          if (m.armor in A) { p.armorHp = A[m.armor]; p.armorMax = A[m.armor]; }
+        }
+        break;
+      }
       case 'respawn':
         p.alive = true; p.hp = 100; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); p.rx = 0;
         this.broadcast(r, { t: 'respawn', id: p.id, pos: p.pos });
@@ -564,8 +577,13 @@ export class GameServer extends DurableObject {
 
   applyDamage(r, tgt, dmg, attacker, head, weapon) {
     if (r.over) return;
+    if (r.mode === 'rounds' && r.phase !== 'live') return; // no damage during buy/over phases
     dmg = Math.max(1, Math.round(dmg * (tgt.dmgTakenMult || 1))); // agent damage-taken perk
     if (tgt.shieldUntil && tgt.shieldUntil > Date.now()) dmg = Math.max(1, Math.round(dmg * 0.55)); // overshield reward absorbs 45%
+    if (tgt.armorHp > 0) { // body armour soaks half the hit until it's depleted
+      const soak = Math.min(tgt.armorHp, Math.round(dmg * 0.5));
+      tgt.armorHp -= soak; dmg -= soak;
+    }
     tgt.hp -= dmg;
     tgt.lastHit = Date.now(); // resets the regen delay
     if (tgt.hp > 0) {
@@ -627,6 +645,40 @@ export class GameServer extends DurableObject {
     return { owner: z.owner, cap: Math.max(0, Math.min(1, z.cap / ZONE_CAP_SECONDS)), capTeam: z.capTeam, contested: z.contested };
   }
   // Survival: run the wave clock. Spawn a wave of raiders, wait until they're
+  // Rounds mode state for clients (HUD + phase).
+  roundPub(r) { return { phase: r.phase, round: r.round, scores: r.scores, endsIn: Math.max(0, Math.round((r.phaseEnd - Date.now()) / 1000)) }; }
+  teamAlive(r, team) { let n = 0; for (const e of this.entities(r)) if (e.alive && e.team === team) n++; return n; }
+  // Round loop: buy (frozen) -> live (no respawn, last team standing wins) -> over -> next round.
+  updateRounds(r, now) {
+    if (r.mode !== 'rounds' || r.over) return;
+    if (r.phase === 'buy') {
+      if (now >= r.phaseEnd) { r.phase = 'live'; r.phaseEnd = now + CFG.roundTime; this.broadcast(r, { t: 'round', ev: 'live', round: r.round }); }
+      return;
+    }
+    if (r.phase === 'over') {
+      if (now >= r.phaseEnd) this.startRound(r, now);
+      return;
+    }
+    // live: decide when a team is wiped or time runs out
+    const red = this.teamAlive(r, 'red'), blue = this.teamAlive(r, 'blue');
+    if (red === 0 && blue === 0) { this.startRound(r, now); return; } // mutual wipe -> replay round
+    let winner = null;
+    if (red === 0) winner = 'blue';
+    else if (blue === 0) winner = 'red';
+    else if (now >= r.phaseEnd) winner = red >= blue ? 'red' : 'blue'; // time up: team with more standing
+    else return; // still fighting
+    r.scores[winner] = (r.scores[winner] || 0) + 1;
+    this.broadcast(r, { t: 'round', ev: 'end', winner, scores: r.scores });
+    this.broadcast(r, { t: 'scores', scores: r.scores });
+    if (r.scores[winner] >= CFG.roundLimit) { this.endMatch(r, winner); return; }
+    r.phase = 'over'; r.phaseEnd = now + CFG.roundOver;
+  }
+  startRound(r, now) {
+    r.round = (r.round || 0) + 1; r.phase = 'buy'; r.phaseEnd = now + CFG.buyTime;
+    for (const c of r.clients.values()) { const p = c.player; p.alive = true; p.hp = 100; p.armorHp = 0; p.armorMax = 0; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); p.respawnAt = 0; this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
+    for (const b of r.bots.values()) { b.alive = true; b.hp = 100; b.armorHp = 0; b.pos = spawnFor(r, b.team); b.ry = ryFor(b.team); b.respawnAt = 0; this.broadcast(r, { t: 'respawn', id: b.id, pos: b.pos }); }
+    this.broadcast(r, { t: 'round', ev: 'buy', round: r.round, scores: r.scores });
+  }
   // all dead, reward the survivors, then queue the next (bigger) wave.
   updateWaves(r, now) {
     if (r.mode !== 'surv' || r.over) return;
@@ -816,6 +868,7 @@ export class GameServer extends DurableObject {
       for (const b of [...r.bots.values()]) if (b.zombie) this.removeBot(r, b.id); // clear leftover raiders
       r.wave = 0; r.waveState = 'prep'; r.nextWaveAt = Date.now() + 4000;
     }
+    if (r.mode === 'rounds') { r.round = 1; r.phase = 'buy'; r.phaseEnd = Date.now() + CFG.buyTime; }
     if (r.pickups) for (const pk of r.pickups) { pk.active = true; pk.respawnAt = 0; }
     if (r.mode === 'ctf') r.flags = makeFlags(r);
     for (const c of r.clients.values()) { const p = c.player; p.hp = 100; p.alive = true; p.kills = 0; p.deaths = 0; p.level = 0; p.streak = 0; p.shieldUntil = 0; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); this.send(c.ws, { t: 'respawn', id: p.id, pos: p.pos }); }
@@ -887,9 +940,11 @@ export class GameServer extends DurableObject {
 
   updateBots(r, dt, now) {
     if (r.over) return;
+    if (r.mode === 'rounds' && r.phase !== 'live') return; // frozen during buy/over phases
+    const noRespawn = r.mode === 'rounds'; // in Rounds, dead bots stay down until the next round
     for (const bot of r.bots.values()) {
       if (!bot.alive) {
-        if (bot.zombie) continue; // raiders stay down — the wave clears when all are dead
+        if (bot.zombie || noRespawn) continue; // raiders / round-dead bots stay down
         if (now >= bot.respawnAt) { bot.alive = true; bot.hp = 100; bot.pos = spawnFor(r, bot.team); this.broadcast(r, { t: 'respawn', id: bot.id, pos: bot.pos }); }
         continue;
       }
@@ -972,14 +1027,15 @@ export class GameServer extends DurableObject {
       this.lastTick = now;
       for (const r of this.rooms.values()) {
         this.updateBots(r, dt, now);
-        // auto-respawn dead human players (the client shows a countdown but never asks)
-        if (!r.over) for (const c of r.clients.values()) {
+        // auto-respawn dead human players (except Rounds mode, where you stay dead until the next round)
+        if (!r.over && r.mode !== 'rounds') for (const c of r.clients.values()) {
           const p = c.player;
           if (!p.alive && p.respawnAt && now >= p.respawnAt) {
             p.alive = true; p.hp = 100; p.pos = spawnFor(r, p.team); p.ry = ryFor(p.team); p.respawnAt = 0;
             this.broadcast(r, { t: 'respawn', id: p.id, pos: p.pos });
           }
         }
+        this.updateRounds(r, now);
         // Passive health regeneration once an entity has avoided damage a while.
         if (!r.over) for (const e of this.entities(r)) {
           if (!e.alive || e.hp >= 100 || now - (e.lastHit || 0) < CFG.regenDelay) continue;
@@ -995,7 +1051,7 @@ export class GameServer extends DurableObject {
         this.updatePickups(r, now);
         const states = [];
         for (const e of this.entities(r)) { if (!e.alive) continue; states.push({ id: e.id, pos: e.pos, ry: e.ry, rx: e.rx, anim: e.anim, hp: Math.round(e.hp) }); }
-        if (states.length) this.broadcast(r, { t: 'states', states, flags: r.mode === 'ctf' && r.flags ? this.flagPub(r) : undefined, zone: r.mode === 'dom' && r.zone ? this.zonePub(r) : undefined });
+        if (states.length) this.broadcast(r, { t: 'states', states, flags: r.mode === 'ctf' && r.flags ? this.flagPub(r) : undefined, zone: r.mode === 'dom' && r.zone ? this.zonePub(r) : undefined, round: r.mode === 'rounds' ? this.roundPub(r) : undefined });
       }
     }, CFG.tick);
   }

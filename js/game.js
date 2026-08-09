@@ -78,8 +78,15 @@ const mobileMove = { x: 0, z: 0, active: false };
 let myRoom = (new URLSearchParams(location.search).get('room') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
 let scoreLimit = 150;
 let botDiff = 'normal';
-let gameMode = 'dm';   // 'dm' | 'ctf' | 'gg' | 'dom' (domination) | 'surv' (survival)
+let gameMode = 'dm';   // 'dm' | 'ctf' | 'gg' | 'dom' | 'surv' | 'rounds'
 let waveNum = 0;       // current Survival wave
+// Rounds mode state
+let roundState = null;         // { phase, round, scores, endsIn }
+let roundCredits = 800;        // buy-phase money (per match)
+let roundPrimary = null;       // bought primary weapon key (null = pistol only)
+let roundArmor = 'none';
+let roundKills = 0;            // kills this round (for the credit reward)
+let spectating = false, specTarget = null;
 let menuMode = 'dm';   // mode chosen on the menu, sent at join
 let myLevel = 0;       // gun-game rung (index into GG_LADDER)
 let sunLight = null, ambLight = null;
@@ -865,7 +872,7 @@ function setupMenu() {
   renderAgent();
 
   // game mode selection (Deathmatch / Capture the Flag)
-  { const sm = localStorage.getItem('blockade_mode'); menuMode = (sm === 'ctf' || sm === 'gg' || sm === 'dom' || sm === 'surv') ? sm : 'dm'; }
+  { const sm = localStorage.getItem('blockade_mode'); menuMode = ['ctf', 'gg', 'dom', 'surv', 'rounds'].includes(sm) ? sm : 'dm'; }
   const modes = document.querySelectorAll('#modeRow .mode');
   const syncModes = () => modes.forEach(el => el.classList.toggle('active', el.dataset.mode === menuMode));
   modes.forEach(el => el.addEventListener('click', () => { menuMode = el.dataset.mode; localStorage.setItem('blockade_mode', menuMode); syncModes(); }));
@@ -1169,6 +1176,8 @@ function leaveGame() {
   hideMatchOver();
   hideZone();
   clearTurrets();
+  stopSpectate(); closeBuyMenu(); me.frozen = false; roundState = null; roundPrimary = null;
+  { const rh = $('roundHud'); if (rh) rh.style.display = 'none'; }
   { const wh = $('waveHud'); if (wh) wh.style.display = 'none'; const st = $('scoreTop'); if (st) st.style.display = ''; }
   const ph = $('pauseHint'); if (ph) ph.style.display = 'none';
   leavingGame = true;
@@ -1236,6 +1245,7 @@ function handleMsg(m) {
       if (gameMode === 'dom') { ensureZone(); if (m.zone) updateZoneState(m.zone); } else hideZone();
       clearTurrets(); if (m.turrets) for (const t of m.turrets) addTurret(t);
       if (gameMode === 'surv') { waveNum = m.wave || 0; }
+      if (gameMode === 'rounds') { roundCredits = 800; roundPrimary = null; roundArmor = 'none'; roundKills = 0; spectating = false; me.frozen = false; if (m.round) applyRoundState(m.round); }
       if (gameMode === 'gg') { myLevel = 0; }
       startGame();
       matchStart = performance.now();
@@ -1287,6 +1297,18 @@ function handleMsg(m) {
       }
       break;
     }
+    case 'round': {
+      if (m.ev === 'live') { announce('FIGHT!', '#7be0a0'); }
+      else if (m.ev === 'buy') { announce(`ROUND ${m.round} — BUY`, '#ffd24a'); }
+      else if (m.ev === 'end') {
+        const won = m.winner === myTeam;
+        announce(won ? 'ROUND WON!' : 'ROUND LOST', won ? '#7be0a0' : '#ff5a5a');
+        feed(`${m.winner === 'red' ? 'RED' : 'BLUE'} wins the round  (${(m.scores && m.scores.red) || 0} : ${(m.scores && m.scores.blue) || 0})`, m.winner);
+        roundCredits = Math.min(9000, roundCredits + (won ? 350 : 250) + roundKills * 100 + 1000);
+        SND.kill();
+      }
+      break;
+    }
     case 'zone': {
       if (m.ev === 'capture') {
         const tn = m.team === 'red' ? 'RED' : 'BLUE';
@@ -1300,6 +1322,7 @@ function handleMsg(m) {
       dbgOnStates(m);
       if (m.flags) updateFlagMeshes(m.flags);
       if (m.zone) updateZoneState(m.zone);
+      if (m.round) applyRoundState(m.round);
       for (const s of m.states) {
         if (s.id === myId) continue;
         const r = remotes.get(s.id);
@@ -1386,7 +1409,7 @@ function handleMsg(m) {
         killStreak = 0; multiKill = 0; me.shieldUntil = 0;
         updateHearts();
         SND.death();
-        showDeathScreen(kName);
+        if (gameMode === 'rounds') startSpectate(); else showDeathScreen(kName); // no respawn in rounds — spectate instead
         // Track who's picking on you — 3 kills makes them your nemesis.
         if (m.killer !== myId) {
           lastKilledBy = m.killer;
@@ -1395,7 +1418,7 @@ function handleMsg(m) {
         }
       }
       if (m.killer === myId && m.victim !== myId) {
-        me.kills++; matchKills++; SND.kill(); onMyKill();
+        me.kills++; matchKills++; roundKills++; SND.kill(); onMyKill();
         // juicy skin-tinted elimination effect + screen shake (bigger on multi-kills)
         const kcol = myTracerColor(SLOTS[me.slot]);
         if (victim) { const kp = victim.group.position.clone(); kp.y += 1.0; makeKillEffect(kp, kcol, multiKill >= 2); }
@@ -1428,6 +1451,7 @@ function handleMsg(m) {
         me.pos.set(m.pos.x, m.pos.y, m.pos.z);
         me.vel.set(0, 0, 0);
         me.hp = 100; me.dead = false; me.shieldUntil = 0;
+        if (gameMode === 'rounds') { stopSpectate(); roundPrimary = roundPrimary || null; } // new round: keep bought loadout, clear spectate
         me.ammo = { rifle: 30, smg: 28, shotgun: 6, sniper: 5, lmg: 60, pistol: 12, bazooka: 1 };
         me.blocks = AGENTS[myAgent]?.blocks || 64; me.nades = AGENTS[myAgent]?.nades ?? MAX_NADES; me.flashes = 2; me.smokes = 2; me.reloading = false;
         me.ry = myTeam === 'red' ? -Math.PI / 2 : Math.PI / 2; me.rx = 0;
@@ -1492,7 +1516,9 @@ function handleMsg(m) {
          : gameMode === 'gg' ? `New match — work through all ${scoreLimit} weapons to win!`
          : gameMode === 'dom' ? `New match — hold the zone to ${scoreLimit} points!`
          : gameMode === 'surv' ? `New run — survive all ${scoreLimit} waves!`
+         : gameMode === 'rounds' ? `New match — first to ${scoreLimit} round wins!`
          : `New match — first to ${scoreLimit} kills wins!`, myTeam);
+      if (gameMode === 'rounds') { roundCredits = 800; roundPrimary = null; roundArmor = 'none'; spectating = false; }
       break;
     default: handleAccountMsg(m); // account/social messages can arrive on the game socket too
   }
@@ -2138,11 +2164,13 @@ function movePlayer(dt) {
   const sprint = keys['ShiftLeft'] || keys['ShiftRight'] || mobileSprint || sprintHeld;
   const speed = (sprint ? SPRINT : WALK) * (AGENTS[myAgent]?.speed || 1);
   let fx = 0, fz = 0;
-  if (keys['KeyW']) fz -= 1;
-  if (keys['KeyS']) fz += 1;
-  if (keys['KeyA']) fx -= 1;
-  if (keys['KeyD']) fx += 1;
-  if (mobileMove.active) { fx = mobileMove.x; fz = mobileMove.z; } // virtual joystick (mobile)
+  if (!me.frozen) { // buy phase / round-over freeze
+    if (keys['KeyW']) fz -= 1;
+    if (keys['KeyS']) fz += 1;
+    if (keys['KeyA']) fx -= 1;
+    if (keys['KeyD']) fx += 1;
+  }
+  if (mobileMove.active && !me.frozen) { fx = mobileMove.x; fz = mobileMove.z; } // virtual joystick (mobile)
   const len = Math.hypot(fx, fz);
   let wishX = 0, wishZ = 0;
   if (len > 0) {
@@ -2229,7 +2257,7 @@ function currentWeapon() { return WEAPONS[SLOTS[me.slot]]; }
 function tryShoot(now) {
   const wkey = SLOTS[me.slot];
   const w = WEAPONS[wkey];
-  if (me.dead || me.reloading) return;
+  if (me.dead || me.reloading || me.frozen || spectating) return;
   if (w.builder) { tryPlaceBlock(); return; }
   if (w.tool) { if (gameMode === 'gg') tryMelee(now); else tryBreakBlock(); return; }
   if (now - me.lastShot < w.rate) return;
@@ -2887,8 +2915,8 @@ function startInspect() {
 
 function selectSlot(i) {
   if (i < 0 || i >= SLOTS.length || i === me.slot) return;
-  // Gun Game: only the current rung weapon and blocks are selectable.
-  if (gameMode === 'gg' && SLOTS[i] !== ggWeaponKey() && SLOTS[i] !== 'blocks') return;
+  // Gun Game / Rounds: only owned weapons are selectable.
+  if ((gameMode === 'gg' || gameMode === 'rounds') && !currentSlots().includes(SLOTS[i])) return;
   me.slot = i;
   me.zoomed = false;
   for (const [k, m] of Object.entries(vm.models)) m.visible = (k === SLOTS[i]);
@@ -3029,11 +3057,17 @@ function drawIcon(kind) {
   return c.toDataURL();
 }
 
+// Which weapon slots are usable in the current mode.
+function currentSlots() {
+  if (gameMode === 'gg') return [ggWeaponKey(), 'blocks'];
+  if (gameMode === 'rounds') return [roundPrimary, 'pistol', 'blocks', 'pickaxe'].filter(Boolean);
+  return SLOTS;
+}
 function updateHotbar() {
   const bar = $('hotbar');
   bar.innerHTML = '';
-  // Gun Game shows only your current rung weapon + blocks; everything else is hidden.
-  const visible = gameMode === 'gg' ? [ggWeaponKey(), 'blocks'] : SLOTS;
+  // Gun Game / Rounds show only the weapons you actually have.
+  const visible = currentSlots();
   visible.forEach((s, pos) => {
     const i = SLOTS.indexOf(s);
     const div = document.createElement('div');
@@ -3128,11 +3162,11 @@ function setupInput() {
     if (e.code === 'KeyG' && !e.repeat) throwGrenade();
     if (e.code === 'KeyX' && !e.repeat) throwUtility('flash');
     if (e.code === 'KeyC' && !e.repeat) throwUtility('smoke');
-    if (e.code === 'KeyB' && !e.repeat) deployTurret();
+    if (e.code === 'KeyB' && !e.repeat) { if (gameMode === 'rounds') toggleBuyMenu(); else deployTurret(); }
     if ((e.code === 'KeyY' || e.code === 'KeyF') && !e.repeat) startInspect();
     if (/^Digit[1-9]$/.test(e.code)) {
       const n = parseInt(e.code[5]) - 1;
-      if (gameMode === 'gg') { const v = [ggWeaponKey(), 'blocks']; if (n < v.length) selectSlot(SLOTS.indexOf(v[n])); }
+      if (gameMode === 'gg' || gameMode === 'rounds') { const v = currentSlots(); if (n < v.length) selectSlot(SLOTS.indexOf(v[n])); }
       else selectSlot(n);
     }
   });
@@ -3150,6 +3184,7 @@ function setupInput() {
   });
   document.addEventListener('mousedown', e => {
     if (!inGame || chatOpen) return;
+    if (spectating) { if (e.button === 0) cycleSpectate(); return; } // dead in a round: click to switch who you watch
     if (!locked) { canvas.requestPointerLock(); return; }
     if (e.button === 0) {
       mouseDown = true;
@@ -3383,6 +3418,106 @@ function updateWaveHud() {
   const sub = waveNum < 1 ? 'get ready…' : alive > 0 ? `${alive} raider${alive === 1 ? '' : 's'} left` : 'brace for the next wave…';
   el.innerHTML = `WAVE <b>${Math.max(waveNum, 0)}</b> / ${scoreLimit}<span class="sub">${sub}</span>`;
 }
+
+// ============================================================
+// Rounds mode: buy phase, no respawn, spectate teammates
+// ============================================================
+const BUY_WEAPONS = [['smg', 'SMG', 800], ['rifle', 'RIFLE', 1500], ['shotgun', 'SHOTGUN', 1200], ['sniper', 'SNIPER', 2400], ['lmg', 'LMG', 2800], ['bazooka', 'ROCKET', 3500]];
+const BUY_ARMOR = [['weak', 'LIGHT SHIELD', 400], ['medium', 'MEDIUM SHIELD', 800], ['strong', 'HEAVY SHIELD', 1200]];
+const BUY_UTIL = [['flash', 'FLASH', 150], ['smoke', 'SMOKE', 150], ['frag', 'FRAG', 250]];
+function applyRoundState(rs) {
+  const prev = roundState && roundState.phase;
+  roundState = rs;
+  if (rs.scores) Object.assign(scores, rs.scores);
+  updateRoundHud();
+  if (rs.phase !== prev) onRoundPhase(rs.phase);
+}
+function onRoundPhase(phase) {
+  if (phase === 'buy') { me.frozen = true; roundArmor = 'none'; roundKills = 0; openBuyMenu(); }
+  else if (phase === 'live') { me.frozen = false; closeBuyMenu(); if (!me.dead) { announce('GO!', '#7be0a0'); SND.spawn(); try { renderer.domElement.requestPointerLock(); } catch {} } }
+  else if (phase === 'over') { me.frozen = true; closeBuyMenu(); }
+}
+function updateRoundHud() {
+  const el = $('roundHud'); if (!el) return;
+  if (gameMode !== 'rounds' || !roundState) { el.style.display = 'none'; return; }
+  const st = $('scoreTop'); if (st) st.style.display = 'none';
+  el.style.display = 'block';
+  const rs = roundState;
+  const sub = rs.phase === 'buy' ? `BUY PHASE · ${rs.endsIn}s` : rs.phase === 'over' ? 'ROUND OVER' : `${rs.endsIn}s`;
+  el.innerHTML = `ROUND ${rs.round} &nbsp; <span style="color:#ff7777">${scores.red || 0}</span> : <span style="color:#8fb0ff">${scores.blue || 0}</span> &nbsp;<span class="sub">${sub}</span>`;
+}
+function buyMsg(t) { const m = $('buyMsg'); if (m) m.textContent = t || ''; }
+function equipPrimary() {
+  const idx = SLOTS.indexOf(roundPrimary); if (idx < 0) return;
+  me.slot = idx; me.zoomed = false;
+  if (vm && vm.models) for (const [k, mo] of Object.entries(vm.models)) mo.visible = (k === roundPrimary);
+  updateHotbar(); updateAmmoHud();
+}
+function buyWeapon(key, cost) {
+  if (roundPrimary === key) return;
+  const prevCost = (BUY_WEAPONS.find(w => w[0] === roundPrimary) || [])[2] || 0;
+  if (roundCredits - cost + prevCost < 0) { buyMsg('Not enough credits'); return; }
+  roundCredits += prevCost - cost; roundPrimary = key;
+  const w = WEAPONS[key]; if (w && w.mag) me.ammo[key] = w.mag;
+  equipPrimary(); renderBuyMenu();
+}
+function buyArmorTier(tier, cost) {
+  if (roundArmor === tier) return;
+  const prevCost = (BUY_ARMOR.find(a => a[0] === roundArmor) || [])[2] || 0;
+  if (roundCredits - cost + prevCost < 0) { buyMsg('Not enough credits'); return; }
+  roundCredits += prevCost - cost; roundArmor = tier;
+  netSend({ t: 'buy', armor: tier }); renderBuyMenu();
+}
+function buyUtil(kind, cost) {
+  if (roundCredits < cost) { buyMsg('Not enough credits'); return; }
+  if (kind === 'flash') { if (me.flashes >= 3) { buyMsg('Max flashes'); return; } me.flashes++; }
+  else if (kind === 'smoke') { if (me.smokes >= 3) { buyMsg('Max smokes'); return; } me.smokes++; }
+  else { if (me.nades >= 3) { buyMsg('Max frags'); return; } me.nades++; }
+  roundCredits -= cost; updateAmmoHud(); renderBuyMenu();
+}
+function renderBuyMenu() {
+  const box = $('buyBody'); if (!box) return;
+  const cr = $('buyCredits'); if (cr) cr.innerHTML = 'CREDITS: <b>' + roundCredits + '</b>';
+  const cell = (label, cost, owned, attr) => `<button class="buy-item ${owned ? 'owned' : ''}" ${attr}><span>${label}</span><i>${owned ? 'OWNED' : cost}</i></button>`;
+  let h = '<div class="buy-col"><h4>PRIMARY WEAPON</h4>';
+  for (const [k, n, c] of BUY_WEAPONS) h += cell(n, c, roundPrimary === k, `data-w="${k}" data-c="${c}"`);
+  h += '</div><div class="buy-col"><h4>SHIELD</h4>';
+  for (const [k, n, c] of BUY_ARMOR) h += cell(n, c, roundArmor === k, `data-a="${k}" data-c="${c}"`);
+  h += '</div><div class="buy-col"><h4>UTILITY</h4>';
+  for (const [k, n, c] of BUY_UTIL) h += cell(n + (k === 'flash' ? ` (x${me.flashes})` : k === 'smoke' ? ` (x${me.smokes})` : ` (x${me.nades})`), c, false, `data-u="${k}" data-c="${c}"`);
+  h += '</div>';
+  box.innerHTML = h;
+  box.querySelectorAll('[data-w]').forEach(b => b.addEventListener('click', () => buyWeapon(b.dataset.w, +b.dataset.c)));
+  box.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', () => buyArmorTier(b.dataset.a, +b.dataset.c)));
+  box.querySelectorAll('[data-u]').forEach(b => b.addEventListener('click', () => buyUtil(b.dataset.u, +b.dataset.c)));
+}
+function openBuyMenu() { if (gameMode !== 'rounds') return; renderBuyMenu(); const m = $('buyMenu'); if (m) m.style.display = 'flex'; try { document.exitPointerLock(); } catch {} }
+function closeBuyMenu() { const m = $('buyMenu'); if (m) m.style.display = 'none'; }
+function buyMenuOpen() { const m = $('buyMenu'); return m && m.style.display !== 'none'; }
+function toggleBuyMenu() {
+  if (!roundState || roundState.phase !== 'buy') { announce('Buy menu only during the buy phase', '#ff9a9a'); return; }
+  if (buyMenuOpen()) { closeBuyMenu(); try { renderer.domElement.requestPointerLock(); } catch {} } else openBuyMenu();
+}
+// Spectate teammates after dying in a round
+function livingTeammates() { return [...remotes.values()].filter(r => r.team === myTeam && r.alive); }
+function startSpectate() {
+  spectating = true;
+  const mates = livingTeammates(); specTarget = mates[0] || null;
+  const sh = $('specHud'); if (sh) sh.style.display = 'block';
+  updateSpecHud();
+}
+function cycleSpectate() {
+  if (!spectating) return;
+  const mates = livingTeammates(); if (!mates.length) { specTarget = null; return; }
+  const i = mates.indexOf(specTarget);
+  specTarget = mates[(i + 1) % mates.length];
+  updateSpecHud();
+}
+function stopSpectate() { spectating = false; specTarget = null; const sh = $('specHud'); if (sh) sh.style.display = 'none'; }
+function updateSpecHud() {
+  const sh = $('specHud'); if (!sh) return;
+  sh.innerHTML = specTarget ? `SPECTATING <b>${specTarget.name}</b><span class="sub">click to switch · waiting for next round</span>` : `WAITING FOR NEXT ROUND<span class="sub">your team is down</span>`;
+}
 function drawMinimap() {
   const cv = $('minimap'); if (!cv) return;
   if (!miniCtx) miniCtx = cv.getContext('2d');
@@ -3456,9 +3591,19 @@ function loop() {
     // screen shake (kills / multi-kills) — a quick decaying jitter on the look
     camShake = Math.max(0, camShake - dt * 1.6);
     const sh = camShake * camShake;
-    camera.rotation.y = me.ry + (Math.random() - 0.5) * sh * 0.12;
-    camera.rotation.x = me.rx + (Math.random() - 0.5) * sh * 0.12;
-    camera.position.set(me.pos.x, me.pos.y + EYE, me.pos.z);
+    if (spectating && gameMode === 'rounds') {
+      if (!specTarget || !specTarget.alive) { const mates = livingTeammates(); specTarget = mates[0] || null; updateSpecHud(); }
+      if (specTarget) {
+        const tp = specTarget.group.position;
+        camera.position.set(tp.x, tp.y + EYE, tp.z);
+        camera.rotation.y = specTarget.try || 0;
+        camera.rotation.x = specTarget.trx || 0;
+      }
+    } else {
+      camera.rotation.y = me.ry + (Math.random() - 0.5) * sh * 0.12;
+      camera.rotation.x = me.rx + (Math.random() - 0.5) * sh * 0.12;
+      camera.position.set(me.pos.x, me.pos.y + EYE, me.pos.z);
+    }
 
     // fov: zoom / sprint
     const targetFov = me.zoomed ? (SLOTS[me.slot] === 'sniper' ? 22 : 55)

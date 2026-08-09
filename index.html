@@ -366,6 +366,24 @@
   #waveHud { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); text-align: center; display: none; z-index: 4; font-size: 13px; letter-spacing: 1px; color: #ff9d4a; text-shadow: 2px 2px 0 #000; }
   #waveHud b { color: #fff; }
   #waveHud .sub { display: block; font-size: 10px; color: #ffd24a; margin-top: 2px; letter-spacing: 0.5px; }
+  /* Rounds mode HUD */
+  #roundHud { position: absolute; top: 66px; left: 50%; transform: translateX(-50%); text-align: center; display: none; z-index: 4; font-size: 14px; letter-spacing: 1px; color: #fff; text-shadow: 2px 2px 0 #000; }
+  #roundHud .sub { color: #ffd24a; font-size: 10px; margin-left: 4px; }
+  #specHud { position: absolute; top: 45%; left: 50%; transform: translateX(-50%); text-align: center; display: none; z-index: 30; color: #fff; font-size: 15px; letter-spacing: 1px; text-shadow: 2px 2px 0 #000; }
+  #specHud b { color: #ffd24a; } #specHud .sub { display: block; font-size: 9px; color: #9fb0d0; margin-top: 6px; }
+  #buyMenu { position: absolute; inset: 4vh 4vw; display: none; flex-direction: column; z-index: 95;
+    background: linear-gradient(180deg, rgba(12,22,42,.97), rgba(8,14,28,.98)); border: 2px solid #2c405f; border-radius: 12px; padding: 16px 20px; box-shadow: 0 24px 90px rgba(0,0,0,.7); }
+  #buyMenu .buy-head { display: flex; justify-content: space-between; align-items: center; font-size: 14px; letter-spacing: 2px; color: #ffd24a; text-shadow: 2px 2px 0 #000; border-bottom: 1px solid #2c405f; padding-bottom: 10px; }
+  #buyMenu #buyCredits { color: #7be0a0; } #buyMenu #buyCredits b { color: #fff; }
+  #buyBody { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 16px 0; overflow-y: auto; }
+  #buyBody .buy-col h4 { color: #9fb0d0; font-size: 10px; letter-spacing: 1px; margin-bottom: 10px; text-align: center; }
+  .buy-item { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;
+    font-family: inherit; font-size: 10px; letter-spacing: .5px; color: #cfd6e6; background: rgba(255,255,255,.05); border: 2px solid #2a3a5c; padding: 12px 12px; cursor: pointer; border-radius: 8px; transition: all .12s; }
+  .buy-item:hover { transform: translateY(-2px); border-color: #4a6299; background: rgba(255,255,255,.12); }
+  .buy-item i { color: #ffd24a; font-style: normal; }
+  .buy-item.owned { border-color: #49c26a; color: #fff; } .buy-item.owned i { color: #49c26a; }
+  #buyMenu .buy-foot { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #2c405f; padding-top: 10px; font-size: 9px; }
+  #buyMenu #buyMsg { color: #ff9a9a; } #buyMenu .buy-hint { color: #8090ad; }
   #announce {
     position: absolute; left: 50%; top: 22%; transform: translateX(-50%);
     font-size: 26px; color: #ffdd55; text-shadow: 3px 3px 0 #000; opacity: 0; pointer-events: none; white-space: nowrap;
@@ -638,6 +656,7 @@
           <span class="mode" data-mode="gg">GUN GAME</span>
           <span class="mode" data-mode="dom">DOMINATION</span>
           <span class="mode" data-mode="surv">SURVIVAL</span>
+          <span class="mode" data-mode="rounds">ROUNDS</span>
         </div>
       </div>
       <div class="bside right">
@@ -753,6 +772,13 @@
     <div id="flashBlind"></div>
     <div id="zoneHud"><span id="zoneTxt"></span><div id="zoneBarWrap"><div id="zoneBar"></div></div></div>
     <div id="waveHud"></div>
+    <div id="roundHud"></div>
+    <div id="specHud"></div>
+    <div id="buyMenu">
+      <div class="buy-head"><span>BUY PHASE</span><span id="buyCredits"></span></div>
+      <div id="buyBody"></div>
+      <div class="buy-foot"><span id="buyMsg"></span><span class="buy-hint">Press B to toggle · auto-closes when the round starts</span></div>
+    </div>
     <div id="announce"></div>
     <div id="matchOver">
       <div class="t" id="matchOverTitle">RED TEAM WINS</div>
