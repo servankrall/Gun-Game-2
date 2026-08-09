@@ -1247,7 +1247,7 @@ function connect(name) {
   // Served under a subpath (/play/<game>/); engine exposes the game socket at <base>/ws.
   const base = location.pathname.replace(/\/+$/, '');
   ws = new WebSocket(`${proto}://${location.host}${base}/ws`);
-  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId(), acct: account ? account.user : null, color: (typeof myColor === 'number' ? myColor : undefined), title: titleText(equippedTitle), charSkin: equippedChar }));
+  ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name, room: myRoom, diff: botDiff, agent: myAgent, mode: menuMode, map: menuMap, pid: presenceId(), acct: account ? account.user : null, color: (typeof myColor === 'number' ? myColor : undefined), title: titleText(equippedTitle), charSkin: equippedChar, weaponSkin: equippedSkin }));
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
@@ -2112,7 +2112,7 @@ function makeNameSprite(name, team, tier, title) {
   return sp;
 }
 
-function makeCharacter(team, name, agentId, color, tier, title, charSkin) {
+function makeCharacter(team, name, agentId, color, tier, title, charSkin, weaponSkin) {
   const group = new THREE.Group();
   const cs = CHAR_SKINS[charSkin] || CHAR_SKINS.default;
   const accentCol = (cs.accent != null) ? cs.accent : ((typeof color === 'number' && color >= 0) ? color : (AGENTS[agentId]?.accent ?? 0x9aa4b2));
@@ -2135,8 +2135,14 @@ function makeCharacter(team, name, agentId, color, tier, title, charSkin) {
   armL.geometry = armL.geometry.clone(); armR.geometry = armR.geometry.clone();
   armL.geometry.translate(0, -0.28, 0); armR.geometry.translate(0, -0.28, 0);
   armL.position.y = armR.position.y = 1.36;
-  // gun in right arm
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.6), new THREE.MeshLambertMaterial({ color: 0x222222 }));
+  // gun in right arm — coloured by the player's equipped weapon skin
+  const gsk = SKINS[weaponSkin];
+  const gunMat = new THREE.MeshLambertMaterial({ color: (gsk && weaponSkin !== 'standard') ? gsk.body : 0x222222 });
+  if (gsk && weaponSkin !== 'standard') {
+    try { gunMat.map = makeSkinTexture(weaponSkin); } catch {}
+    if (gunMat.emissive && GLOW_SKINS.has(weaponSkin)) { gunMat.emissive.setHex(gsk.emissive || gsk.accent); gunMat.emissiveIntensity = 0.5; }
+  }
+  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.12, 0.6), gunMat);
   gun.position.set(0.37, 0.78, -0.42);
   // legs
   const legL = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.7, 0.25), pants);
@@ -2160,7 +2166,7 @@ function makeCharacter(team, name, agentId, color, tier, title, charSkin) {
 
 function addRemote(p) {
   if (remotes.has(p.id)) return;
-  const group = makeCharacter(p.team, p.name, p.agent, p.color, p.rankTier, p.title, p.charSkin);
+  const group = makeCharacter(p.team, p.name, p.agent, p.color, p.rankTier, p.title, p.charSkin, p.weaponSkin);
   group.position.set(p.pos.x, p.pos.y, p.pos.z);
   group.rotation.y = p.ry + Math.PI;
   group.visible = p.alive;
@@ -3435,7 +3441,7 @@ function startGame() {
   updateHearts(); updateHotbar(); updateAmmoHud();
   SND.spawn();
   if (mobile) setTimeout(() => { $('teamBanner').style.display = 'none'; }, 1600);
-  else renderer.domElement.requestPointerLock();
+  else if (!buyMenuOpen()) renderer.domElement.requestPointerLock(); // keep cursor free for the buy menu
 }
 
 // ============================================================
