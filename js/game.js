@@ -177,8 +177,11 @@ const TITLES = {
   apex:         { name: 'APEX', tier: 50, cost: 0 },
   ghost:        { name: 'GHOST', tier: 0, cost: 400 },
   reaper:       { name: 'REAPER', tier: 0, cost: 800 },
-  overlord:     { name: 'OVERLORD', tier: 0, cost: 1500 },
+  destroyer:    { name: 'DESTROYER', tier: 0, cost: 1100 },
+  phantom:      { name: 'PHANTOM', tier: 0, cost: 1600 },
+  overlord:     { name: 'OVERLORD', tier: 0, cost: 2200 },
   godmode:      { name: 'GOD MODE', tier: 0, cost: 3000 },
+  mythic:       { name: 'MYTHIC', tier: 45, cost: 0 },
 };
 let ownedTitles = (() => { try { const a = JSON.parse(localStorage.getItem('bf_titles')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
 ownedTitles.add('none');
@@ -199,7 +202,12 @@ const SKINS = {
   sovereign:   { name: 'SOVEREIGN',    body: 0xe8e2cf, accent: 0xcaa64a, emissive: 0x2a2410, tracer: 0xffe08a, tier: 0, cost: 1800 },
   oni:         { name: 'ONI',          body: 0x1a1030, accent: 0xc23bd6, emissive: 0x3a0a4a, tracer: 0xff4fd8, tier: 0, cost: 2000 },
   glitchpop:   { name: 'GLITCHPOP',    body: 0x2a0a3a, accent: 0x35f0ff, emissive: 0x2a0a3a, tracer: 0xff4fd8, tier: 0, cost: 2400 },
+  arctic:      { name: 'ARCTIC',       body: 0xe8f0f6, accent: 0x7fb0d0, emissive: 0x101820, tracer: 0x9fe0ff, tier: 0, cost: 900 },
+  toxic:       { name: 'TOXIC',        body: 0x18280f, accent: 0x8aff2a, emissive: 0x1a3a08, tracer: 0x8aff2a, tier: 0, cost: 1300 },
+  molten:      { name: 'MOLTEN',       body: 0x1a0a06, accent: 0xff5a1a, emissive: 0x5a1a06, tracer: 0xff5a1a, tier: 0, cost: 1800 },
+  cyber:       { name: 'CYBERPUNK',    body: 0x120a2a, accent: 0x2affea, emissive: 0x2a0a3a, tracer: 0xff3ea8, tier: 0, cost: 2600 },
   dragon:      { name: 'ELDER DRAGON', body: 0x2a1206, accent: 0xff7a1a, emissive: 0x5a2600, tracer: 0xff7a1a, tier: 0, cost: 3200 },
+  mythicgun:   { name: 'MYTHIC',       body: 0xf0e6c0, accent: 0xffd24a, emissive: 0x4a3a10, tracer: 0xffd24a, tier: 45, cost: 0 },
 };
 let ownedSkins = (() => { try { const a = JSON.parse(localStorage.getItem('bf_skins')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
 ownedSkins.add('standard');
@@ -218,8 +226,12 @@ const CHAR_SKINS = {
   frost:   { name: 'FROSTBITE', accent: 0x9fe0ff, pants: 0x25414f, glow: false, tier: 0, cost: 900 },
   ember:   { name: 'EMBER', accent: 0xff7a1a, pants: 0x3a1a06, glow: true, tier: 0, cost: 1200 },
   neon:    { name: 'NEON RONIN', accent: 0xff4fd8, pants: 0x2a0a2a, glow: true, tier: 0, cost: 1600 },
-  voidwlk: { name: 'VOIDWALKER', accent: 0x8a4bff, pants: 0x1a1030, glow: true, tier: 0, cost: 2000 },
+  crimson: { name: 'CRIMSON GUARD', accent: 0xd83a34, pants: 0x3a1010, glow: false, tier: 0, cost: 800 },
+  toxicc:  { name: 'BIOHAZARD', accent: 0x8aff2a, pants: 0x1a2a10, glow: true, tier: 0, cost: 1400 },
+  cyberc:  { name: 'CYBER RONIN', accent: 0x2affea, pants: 0x120a2a, glow: true, tier: 0, cost: 1800 },
+  voidwlk: { name: 'VOIDWALKER', accent: 0x8a4bff, pants: 0x1a1030, glow: true, tier: 0, cost: 2200 },
   golden:  { name: 'GOLD PLATE', accent: 0xffd24a, pants: 0x3a3010, glow: true, tier: 0, cost: 2800 },
+  champion:{ name: 'CHAMPION', accent: 0xffe08a, pants: 0x2a2410, glow: true, tier: 45, cost: 0 },
 };
 let ownedChars = (() => { try { const a = JSON.parse(localStorage.getItem('bf_chars')); return new Set(Array.isArray(a) ? a : []); } catch { return new Set(); } })();
 ownedChars.add('default');
@@ -237,10 +249,11 @@ function myTracerColor(wkey) {
 const SKIN_PATTERN = {
   standard: 'plain', recruit: 'camo', ranger: 'camo', chronovoid: 'hex', radiant: 'gold',
   prime: 'plain', neofrontier: 'circuit', kuronami: 'wave', sovereign: 'gold', oni: 'scale',
-  glitchpop: 'glitch', dragon: 'scale',
+  glitchpop: 'glitch', dragon: 'scale', arctic: 'hex', toxic: 'camo', molten: 'wave',
+  cyber: 'circuit', mythicgun: 'gold',
 };
 // Premium skins pulse an animated glow in-game and in the preview.
-const GLOW_SKINS = new Set(['chronovoid', 'radiant', 'neofrontier', 'oni', 'glitchpop', 'dragon']);
+const GLOW_SKINS = new Set(['chronovoid', 'radiant', 'neofrontier', 'oni', 'glitchpop', 'dragon', 'toxic', 'molten', 'cyber', 'mythicgun']);
 const _skinTexCache = {};
 function makeSkinTexture(id) {
   if (_skinTexCache[id]) return _skinTexCache[id];
@@ -435,7 +448,7 @@ function buyChar(id) {
 function skinRarity(id) {
   const s = SKINS[id]; if (!s) return { name: 'RARE', color: '#5ad1ff' };
   if (id === 'standard') return { name: 'STANDARD', color: '#9fb0d0' };
-  if (id === 'dragon') return { name: 'EXOTIC', color: '#ff7a1a' };
+  if (id === 'dragon' || id === 'mythicgun') return { name: 'EXOTIC', color: '#ff7a1a' };
   if (s.tier > 0) return { name: 'CAREER', color: '#7be0a0' };
   if (s.cost >= 1800) return { name: 'LEGENDARY', color: '#ffd24a' };
   if (s.cost >= 1000) return { name: 'EPIC', color: '#c78bff' };
@@ -1204,6 +1217,8 @@ function backToMenu() {
   inGame = false;
   $('hud').style.display = 'none';
   $('menu').style.display = 'flex';
+  const pb = $('playBtn'); if (pb) pb.disabled = false; // re-enable PLAY (start() disabled it)
+  try { document.exitPointerLock(); } catch {}
   try { connectLobby(); } catch {}
 }
 function leaveGame() {
@@ -1590,6 +1605,7 @@ function renderMatchAwards() {
   box.innerHTML = mvpLine + medalHtml;
 }
 function showMatchOver(winner, sc, winnerName) {
+  try { document.exitPointerLock(); } catch {} // release the mouse so MAIN MENU is clickable
   if (sc) { Object.assign(scores, sc); $('scoreRed').textContent = scores.red; $('scoreBlue').textContent = scores.blue; }
   const st = $('matchStats'); if (st) st.textContent = `You — ${matchKills} kills · ${matchDeaths} deaths · best streak ${bestStreak}`;
   renderMatchAwards();
@@ -3242,7 +3258,8 @@ function setupInput() {
   document.addEventListener('pointerlockchange', () => {
     locked = document.pointerLockElement === canvas;
     if (inGame) {
-      $('pauseHint').style.display = (locked || buyMenuOpen()) ? 'none' : 'flex'; // don't show pause behind the buy menu
+      const overShown = $('matchOver') && getComputedStyle($('matchOver')).display !== 'none';
+      $('pauseHint').style.display = (locked || buyMenuOpen() || overShown) ? 'none' : 'flex'; // don't show pause behind buy menu / match-over
       if (!locked) refreshSettingInputs();
       $('teamBanner').style.display = 'none';
     }
