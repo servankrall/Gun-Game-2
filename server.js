@@ -464,6 +464,7 @@ export class GameServer extends DurableObject {
       else if (m.mode === 'dom') { r.mode = 'dom'; r.zone = { owner: null, cap: 0, capTeam: null, accum: 0, contested: false }; }
       else if (m.mode === 'surv') { r.mode = 'surv'; r.wave = 0; r.waveState = 'prep'; r.nextWaveAt = Date.now() + 4000; }
       else if (m.mode === 'rounds') { r.mode = 'rounds'; r.round = 1; r.phase = 'buy'; r.phaseEnd = Date.now() + CFG.buyTime; }
+      else if (m.mode === 'snipers' || m.mode === 'rockets') { r.mode = m.mode; } // team-deathmatch scoring, restricted weapons (client)
     }
     const team = r.mode === 'surv' ? 'red' : this.pickTeam(r); // survivors are all one team
     const name = String(m.name || 'Player').slice(0, 16) || 'Player';
@@ -611,11 +612,12 @@ export class GameServer extends DurableObject {
     if (r.mode === 'ctf' && r.flags) this.dropFlagIfCarrier(r, tgt); // drop the flag where they fell
     // Deathmatch kills score for the team; CTF scores only on captures; Gun Game
     // tracks individual weapon-ladder progress instead of team score.
-    if (r.mode === 'dm' && attacker) r.scores[attacker.team] = (r.scores[attacker.team] || 0) + 1;
+    const dmScored = r.mode === 'dm' || r.mode === 'snipers' || r.mode === 'rockets';
+    if (dmScored && attacker) r.scores[attacker.team] = (r.scores[attacker.team] || 0) + 1;
     this.broadcast(r, { t: 'death', victim: tgt.id, killer: attacker ? attacker.id : tgt.id, head, w: weapon || 'rifle' });
     this.broadcast(r, { t: 'scores', scores: r.scores });
     if (r.mode === 'gg') this.ggProgress(r, attacker, tgt, weapon);
-    if (r.mode === 'dm' && attacker && r.scores[attacker.team] >= CFG.scoreLimit) this.endMatch(r, attacker.team);
+    if (dmScored && attacker && r.scores[attacker.team] >= CFG.scoreLimit) this.endMatch(r, attacker.team);
   }
 
   // Gun Game: advance the killer up the weapon ladder (refilling their health),

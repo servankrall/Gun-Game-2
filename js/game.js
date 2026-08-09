@@ -578,6 +578,7 @@ function saveFriends() { if (account) syncAccount(); else localStorage.setItem('
 let lobbyWs = null, lobbyTimer = null, presenceCache = {};
 let menuRefresh = null; // set by setupMenu so auth changes can refresh the menu view
 let renderModes = () => {}; // set by setupMenu; renders the MODES page
+const MODE_NAMES = { dm: 'DEATHMATCH', ctf: 'CAPTURE THE FLAG', gg: 'GUN GAME', dom: 'DOMINATION', surv: 'SURVIVAL', rounds: 'ROUNDS', snipers: 'SNIPERS', rockets: 'ROCKETS' };
 // ---- account (optional login; syncs coins/unlocks/friends across devices) ----
 let account = null; // { user, token } when logged in
 let authToken = localStorage.getItem('bf_token') || null;
@@ -872,11 +873,11 @@ function setupMenu() {
   $('agentNext') && $('agentNext').addEventListener('click', () => cycle(1));
   renderAgent();
 
-  // game mode selection (Deathmatch / Capture the Flag)
-  { const sm = localStorage.getItem('blockade_mode'); menuMode = ['ctf', 'gg', 'dom', 'surv', 'rounds'].includes(sm) ? sm : 'dm'; }
-  const modes = document.querySelectorAll('#modeRow .mode');
-  const syncModes = () => modes.forEach(el => el.classList.toggle('active', el.dataset.mode === menuMode));
-  modes.forEach(el => el.addEventListener('click', () => { menuMode = el.dataset.mode; localStorage.setItem('blockade_mode', menuMode); syncModes(); }));
+  // game mode is picked on the MODES page; a button by PLAY shows the current one
+  { const sm = localStorage.getItem('blockade_mode'); menuMode = ['ctf', 'gg', 'dom', 'surv', 'rounds', 'snipers', 'rockets'].includes(sm) ? sm : 'dm'; }
+  const syncModes = () => { const b = $('modeBtn'); if (b) b.textContent = 'MODE: ' + (MODE_NAMES[menuMode] || 'DEATHMATCH') + ' ▸'; };
+  { const b = $('modeBtn'); if (b) b.addEventListener('click', () => { const t = document.querySelector('#navtabs .tab[data-view="modes"]'); if (t) t.click(); }); }
+  window._syncModes = syncModes; // let renderModes refresh the button label
   syncModes();
 
   // options panel toggle
@@ -989,12 +990,14 @@ function setupMenu() {
   renderModes = () => {
     const box = $('modeGrid'); if (!box) return;
     const MODES = [
-      ['dm', 'DEATHMATCH', 'Free-for-all team kills. First team to the score cap wins.'],
+      ['dm', 'DEATHMATCH', 'Team kills race. First team to the score cap wins.'],
       ['ctf', 'CAPTURE THE FLAG', 'Grab the enemy flag and run it back to your base.'],
       ['gg', 'GUN GAME', 'Every kill upgrades your gun. Reach the last weapon to win.'],
       ['dom', 'DOMINATION', 'Hold the central zone to bank points for your team.'],
       ['surv', 'SURVIVAL', 'Co-op: hold off escalating waves of raiders.'],
       ['rounds', 'ROUNDS', 'Tactical rounds: buy phase, no respawns, last team standing.'],
+      ['snipers', 'SNIPERS', 'Sniper-only duels — one clean shot decides it.'],
+      ['rockets', 'ROCKETS', 'Rocket launchers only. Explosive, chaotic team fights.'],
     ];
     box.innerHTML = MODES.map(([id, n, d]) =>
       `<div class="mode-card mode-${id} ${menuMode === id ? 'sel' : ''}" data-m="${id}">
@@ -1004,7 +1007,7 @@ function setupMenu() {
       </div>`).join('');
     box.querySelectorAll('[data-m]').forEach(c => c.addEventListener('click', () => {
       menuMode = c.dataset.m; localStorage.setItem('blockade_mode', menuMode);
-      document.querySelectorAll('#modeRow .mode').forEach(el => el.classList.toggle('active', el.dataset.mode === menuMode));
+      if (window._syncModes) window._syncModes();
       renderModes();
     }));
   };
@@ -1279,6 +1282,7 @@ function handleMsg(m) {
       if (gameMode === 'surv') { waveNum = m.wave || 0; }
       if (gameMode === 'rounds') { roundCredits = 800; roundPrimary = null; roundArmor = 'none'; roundKills = 0; spectating = false; me.frozen = false; if (m.round) applyRoundState(m.round); }
       if (gameMode === 'gg') { myLevel = 0; }
+      { const ds = defaultSlotForMode(); if (ds) me.slot = Math.max(0, SLOTS.indexOf(ds)); } // snipers/rockets start on their weapon
       startGame();
       matchStart = performance.now();
       matchKills = 0; matchDeaths = 0; bestStreak = 0; lastKilledBy = null; for (const k in nemesisDeaths) delete nemesisDeaths[k]; me.shieldUntil = 0;
@@ -1489,6 +1493,7 @@ function handleMsg(m) {
         me.ry = myTeam === 'red' ? -Math.PI / 2 : Math.PI / 2; me.rx = 0;
         updateHearts(); updateAmmoHud(); updateHotbar();
         if (gameMode === 'gg') applyGunGameWeapon();
+        { const ds = defaultSlotForMode(); if (ds) { const i = SLOTS.indexOf(ds); if (i >= 0) { me.slot = i; updateHotbar(); updateAmmoHud(); } } }
         $('deathScreen').style.display = 'none';
         const f = $('respawnFlash');
         f.style.opacity = 0.8; f.style.transition = 'none';
@@ -2947,8 +2952,8 @@ function startInspect() {
 
 function selectSlot(i) {
   if (i < 0 || i >= SLOTS.length || i === me.slot) return;
-  // Gun Game / Rounds: only owned weapons are selectable.
-  if ((gameMode === 'gg' || gameMode === 'rounds') && !currentSlots().includes(SLOTS[i])) return;
+  // only weapons available in the current mode are selectable
+  if (!currentSlots().includes(SLOTS[i])) return;
   me.slot = i;
   me.zoomed = false;
   for (const [k, m] of Object.entries(vm.models)) m.visible = (k === SLOTS[i]);
@@ -3093,7 +3098,14 @@ function drawIcon(kind) {
 function currentSlots() {
   if (gameMode === 'gg') return [ggWeaponKey(), 'blocks'];
   if (gameMode === 'rounds') return [roundPrimary, 'pistol', 'blocks', 'pickaxe'].filter(Boolean);
+  if (gameMode === 'snipers') return ['sniper', 'pickaxe', 'blocks'];
+  if (gameMode === 'rockets') return ['bazooka', 'pickaxe', 'blocks'];
   return SLOTS;
+}
+function defaultSlotForMode() {
+  if (gameMode === 'snipers') return 'sniper';
+  if (gameMode === 'rockets') return 'bazooka';
+  return null;
 }
 function updateHotbar() {
   const bar = $('hotbar');
@@ -3198,8 +3210,7 @@ function setupInput() {
     if ((e.code === 'KeyY' || e.code === 'KeyF') && !e.repeat) startInspect();
     if (/^Digit[1-9]$/.test(e.code)) {
       const n = parseInt(e.code[5]) - 1;
-      if (gameMode === 'gg' || gameMode === 'rounds') { const v = currentSlots(); if (n < v.length) selectSlot(SLOTS.indexOf(v[n])); }
-      else selectSlot(n);
+      const v = currentSlots(); if (n < v.length) selectSlot(SLOTS.indexOf(v[n]));
     }
   });
   document.addEventListener('keyup', e => {
@@ -3526,7 +3537,7 @@ function renderBuyMenu() {
 }
 function openBuyMenu() { if (gameMode !== 'rounds') return; renderBuyMenu(); const m = $('buyMenu'); if (m) m.style.display = 'flex'; try { document.exitPointerLock(); } catch {} }
 function closeBuyMenu() { const m = $('buyMenu'); if (m) m.style.display = 'none'; }
-function buyMenuOpen() { const m = $('buyMenu'); return m && m.style.display !== 'none'; }
+function buyMenuOpen() { const m = $('buyMenu'); return !!(m && getComputedStyle(m).display !== 'none'); }
 function toggleBuyMenu() {
   if (!roundState || roundState.phase !== 'buy') { announce('Buy menu only during the buy phase', '#ff9a9a'); return; }
   if (buyMenuOpen()) { closeBuyMenu(); try { renderer.domElement.requestPointerLock(); } catch {} } else openBuyMenu();

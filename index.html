@@ -631,6 +631,12 @@
   .mode-dom .mc-scene { background: linear-gradient(180deg,#40140f,#a63a1f 55%,#5a4030 55%,#2a1a12); }
   .mode-surv .mc-scene { background: linear-gradient(180deg,#0a1a12,#14402a 55%,#3a5a2a 55%,#1a2a12); }
   .mode-rounds .mc-scene { background: linear-gradient(180deg,#101426,#2a3350 55%,#7a6a4a 55%,#3a2f22); }
+  .mode-snipers .mc-scene { background: linear-gradient(180deg,#20304a,#5a7690 55%,#cfe0ee 55%,#8fa6bc); }
+  .mode-rockets .mc-scene { background: linear-gradient(180deg,#2a0f0a,#7a2a12 55%,#e07a2a 55%,#5a2a12); }
+  /* mode button next to PLAY */
+  .modebtn { margin-top: 12px; font-family: inherit; font-size: 10px; letter-spacing: 1px; color: #ffe6a8; cursor: pointer;
+    background: rgba(255,210,74,.1); border: 2px solid #ffd24a55; border-radius: 8px; padding: 10px 18px; transition: all .14s; }
+  .modebtn:hover { background: rgba(255,210,74,.22); border-color: #ffd24a; transform: translateY(-2px); }
 
   /* ---- prettier panels: consistent titles + cards ---- */
   .ltitle { font-size: 13px; letter-spacing: 2px; color: #fff; text-shadow: 2px 2px 0 #000; padding-bottom: 12px; border-bottom: 1px solid #223350; margin-bottom: 6px; }
@@ -700,14 +706,7 @@
       </div>
       <div class="bmid">
         <button id="playBtn" class="playbtn">PLAY</button>
-        <div id="modeRow">
-          <span class="mode active" data-mode="dm">DEATHMATCH</span>
-          <span class="mode" data-mode="ctf">CAPTURE THE FLAG</span>
-          <span class="mode" data-mode="gg">GUN GAME</span>
-          <span class="mode" data-mode="dom">DOMINATION</span>
-          <span class="mode" data-mode="surv">SURVIVAL</span>
-          <span class="mode" data-mode="rounds">ROUNDS</span>
-        </div>
+        <button id="modeBtn" class="modebtn">MODE: DEATHMATCH ▸</button>
       </div>
       <div class="bside right">
         <button id="friendsBtn" class="linkbtn">FRIENDS</button>
