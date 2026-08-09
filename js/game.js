@@ -577,6 +577,7 @@ let friends = (() => { try { const f = JSON.parse(localStorage.getItem('bf_frien
 function saveFriends() { if (account) syncAccount(); else localStorage.setItem('bf_friends', JSON.stringify(friends)); }
 let lobbyWs = null, lobbyTimer = null, presenceCache = {};
 let menuRefresh = null; // set by setupMenu so auth changes can refresh the menu view
+let renderModes = () => {}; // set by setupMenu; renders the MODES page
 // ---- account (optional login; syncs coins/unlocks/friends across devices) ----
 let account = null; // { user, token } when logged in
 let authToken = localStorage.getItem('bf_token') || null;
@@ -943,7 +944,7 @@ function setupMenu() {
   // ---- daily reward ----
   const db = $('dailyBtn');
   if (db) db.addEventListener('click', () => {
-    if (!account) { $('dailyMsg') && ($('dailyMsg').textContent = 'Log in to claim daily coins'); return; }
+    if (!account) { dailyToast('Log in to claim daily coins'); return; }
     authSend({ t: 'daily_claim', token: account.token });
   });
 
@@ -957,7 +958,7 @@ function setupMenu() {
   renderAchievements();
 
   // ---- career (battle pass) + cosmetics shop ----
-  const PANELS = ['authPanel', 'friendsPanel', 'leaderPanel', 'awardsPanel', 'optPanel', 'careerPanel', 'shopPanel'];
+  const PANELS = ['authPanel', 'friendsPanel', 'leaderPanel', 'awardsPanel', 'optPanel', 'careerPanel', 'shopPanel', 'modePanel'];
   const syncModal = () => { const on = PANELS.some(p => { const e = $(p); return e && e.classList.contains('open'); }); const bd = $('modalBackdrop'), cx = $('modalClose'); if (bd) bd.classList.toggle('on', on); if (cx) cx.classList.toggle('on', on); };
   const closeAllPanels = () => { PANELS.forEach(p => { const e = $(p); if (e) e.classList.remove('open'); }); stopPreview(); syncModal(); };
   const togglePanel = id => { const el = $(id); const was = el.classList.contains('open'); closeAllPanels(); if (!was) el.classList.add('open'); syncModal(); };
@@ -972,14 +973,41 @@ function setupMenu() {
   const careerBtn = $('careerBtn'); if (careerBtn) careerBtn.addEventListener('click', () => { togglePanel('careerPanel'); renderCareer(); });
   const shopBtn = $('shopBtn'); if (shopBtn) shopBtn.addEventListener('click', () => { togglePanel('shopPanel'); renderShop(); });
   document.querySelectorAll('#shopTabs .shopcat').forEach(t => t.addEventListener('click', () => { shopCat = t.dataset.cat; renderShop(); }));
-  // nav tabs: PLAY (close panels), CAREER, COSMETICS
+  // the lobby "+" slots invite friends
+  document.querySelectorAll('#lobby [data-invite]').forEach(s => s.addEventListener('click', () => { togglePanel('friendsPanel'); connectLobby(); requestPresence(); }));
+  // top nav tabs open full-screen pages
   document.querySelectorAll('#navtabs .tab').forEach(tab => tab.addEventListener('click', () => {
     const to = tab.dataset.view;
     document.querySelectorAll('#navtabs .tab').forEach(t => t.classList.toggle('active', t === tab));
     if (to === 'career') { togglePanel('careerPanel'); renderCareer(); }
     else if (to === 'shop') { togglePanel('shopPanel'); renderShop(); }
+    else if (to === 'modes') { togglePanel('modePanel'); renderModes(); }
+    else if (to === 'friends') { togglePanel('friendsPanel'); connectLobby(); requestPresence(); }
     else closeAllPanels();
   }));
+  // MODE selection page
+  renderModes = () => {
+    const box = $('modeGrid'); if (!box) return;
+    const MODES = [
+      ['dm', 'DEATHMATCH', 'Free-for-all team kills. First team to the score cap wins.'],
+      ['ctf', 'CAPTURE THE FLAG', 'Grab the enemy flag and run it back to your base.'],
+      ['gg', 'GUN GAME', 'Every kill upgrades your gun. Reach the last weapon to win.'],
+      ['dom', 'DOMINATION', 'Hold the central zone to bank points for your team.'],
+      ['surv', 'SURVIVAL', 'Co-op: hold off escalating waves of raiders.'],
+      ['rounds', 'ROUNDS', 'Tactical rounds: buy phase, no respawns, last team standing.'],
+    ];
+    box.innerHTML = MODES.map(([id, n, d]) =>
+      `<div class="mode-card mode-${id} ${menuMode === id ? 'sel' : ''}" data-m="${id}">
+        <div class="mc-scene"></div>
+        <div class="mc-body"><div class="mc-name">${n}</div><div class="mc-desc">${d}</div>
+        <div class="mc-go">${menuMode === id ? 'SELECTED' : 'SELECT'}</div></div>
+      </div>`).join('');
+    box.querySelectorAll('[data-m]').forEach(c => c.addEventListener('click', () => {
+      menuMode = c.dataset.m; localStorage.setItem('blockade_mode', menuMode);
+      document.querySelectorAll('#modeRow .mode').forEach(el => el.classList.toggle('active', el.dataset.mode === menuMode));
+      renderModes();
+    }));
+  };
   updateProfileCard(); renderCareer(); renderShop();
 }
 
@@ -1042,10 +1070,14 @@ function renderRequests() {
     row.appendChild(btns); box.appendChild(row);
   }
 }
+function dailyToast(html) {
+  const el = $('dailyMsg'); if (!el) return;
+  el.innerHTML = html; el.classList.add('show');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 3500);
+}
 function onDaily(m) {
-  const el = $('dailyMsg');
-  if (m.ok) { coins = m.coins; setCoinBal(); if (el) el.innerHTML = '+' + m.reward + ' ' + COIN + ' claimed!'; }
-  else if (el) { el.textContent = m.error || 'not available'; if (m.next) { const h = Math.max(0, Math.ceil((m.next - Date.now()) / 3600000)); el.textContent += ' (~' + h + 'h)'; } }
+  if (m.ok) { coins = m.coins; setCoinBal(); dailyToast('+' + m.reward + ' ' + COIN + ' claimed!'); }
+  else { let t = m.error || 'not available'; if (m.next) { const h = Math.max(0, Math.ceil((m.next - Date.now()) / 3600000)); t += ' (~' + h + 'h)'; } dailyToast(t); }
 }
 function renderLeaderboard(list) {
   const box = $('leaderList'); if (!box) return;
@@ -3184,6 +3216,7 @@ function setupInput() {
   });
   document.addEventListener('mousedown', e => {
     if (!inGame || chatOpen) return;
+    if (buyMenuOpen()) return; // buy phase: let clicks reach the buy buttons (don't grab the pointer)
     if (spectating) { if (e.button === 0) cycleSpectate(); return; } // dead in a round: click to switch who you watch
     if (!locked) { canvas.requestPointerLock(); return; }
     if (e.button === 0) {
@@ -3198,7 +3231,7 @@ function setupInput() {
   document.addEventListener('pointerlockchange', () => {
     locked = document.pointerLockElement === canvas;
     if (inGame) {
-      $('pauseHint').style.display = locked ? 'none' : 'flex';
+      $('pauseHint').style.display = (locked || buyMenuOpen()) ? 'none' : 'flex'; // don't show pause behind the buy menu
       if (!locked) refreshSettingInputs();
       $('teamBanner').style.display = 'none';
     }

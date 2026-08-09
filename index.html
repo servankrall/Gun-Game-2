@@ -583,16 +583,64 @@
     animation: modalIn .2s ease-out; box-shadow: 0 24px 80px rgba(0,0,0,.6);
   }
   @keyframes modalIn { from { opacity: 0; transform: translate(-50%, -50%) scale(.96); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
-  /* big panels (career + cosmetics) open as a full-screen PAGE in front of you */
-  #careerPanel.open, #shopPanel.open {
-    position: fixed; inset: 3vh 3vw; left: 3vw; top: 3vh; transform: none;
+  /* big panels (career + cosmetics + modes) open as a full-screen PAGE in front of you */
+  #careerPanel.open, #shopPanel.open, #modePanel.open {
+    display: flex; position: fixed; inset: 3vh 3vw; left: 3vw; top: 3vh; transform: none;
     z-index: 130; margin: 0; width: auto; max-width: none; height: auto; max-height: none;
     overflow-y: auto; overflow-x: hidden; animation: pageIn .22s ease-out; box-shadow: 0 24px 90px rgba(0,0,0,.7);
   }
+  #modePanel { display: none; flex-direction: column; gap: 14px; background: linear-gradient(180deg, rgba(14,24,44,.96), rgba(8,14,28,.98)); border: 1px solid #2c405f; border-radius: 14px; padding: 18px 22px; }
   @keyframes pageIn { from { opacity: 0; transform: scale(.985); } to { opacity: 1; transform: scale(1); } }
   /* pixel-style scrollbars inside modals */
   #careerPanel::-webkit-scrollbar, #shopPanel::-webkit-scrollbar, #authPanel::-webkit-scrollbar, #friendsPanel::-webkit-scrollbar, #leaderPanel::-webkit-scrollbar, #awardsPanel::-webkit-scrollbar, .shopgrid::-webkit-scrollbar { width: 10px; height: 10px; }
   #careerPanel::-webkit-scrollbar-thumb, #shopPanel::-webkit-scrollbar-thumb, .shopgrid::-webkit-scrollbar-thumb { background: #2c405f; border: 2px solid #0c1730; }
+
+  /* ---- lobby "+" slots become friend-invite slots ---- */
+  .pslot.invite { cursor: pointer; transition: transform .12s, border-color .15s, background .15s; }
+  .pslot.invite:hover { transform: translateY(-4px); border-color: #ffd24a; background: rgba(255,210,74,.06); }
+  .pslot.invite span { transition: color .15s; }
+  .pslot.invite:hover span { color: #ffd24a; }
+  .pslot.invite em { display: block; margin-top: 10px; font-style: normal; font-size: 8px; letter-spacing: 2px; color: #6f7f9f; }
+  .pslot.invite:hover em { color: #ffe6a8; }
+
+  /* ---- daily reward toast (no longer overflows the bar) ---- */
+  #dailyMsg.dailymsg { position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%); z-index: 60;
+    background: rgba(12,22,42,.95); border: 1px solid #ffd24a66; border-radius: 8px; padding: 8px 16px; min-height: 0;
+    box-shadow: 0 8px 30px rgba(0,0,0,.5); opacity: 0; transition: opacity .2s; pointer-events: none; white-space: nowrap; }
+  #dailyMsg.dailymsg.show { opacity: 1; }
+
+  /* ---- MODES page: cards with a stylised in-game scene backdrop ---- */
+  #modeGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; padding: 4px; }
+  .mode-card { position: relative; border: 2px solid #223350; border-radius: 14px; overflow: hidden; cursor: pointer; min-height: 190px;
+    display: flex; flex-direction: column; justify-content: flex-end; transition: transform .14s, border-color .15s, box-shadow .15s; }
+  .mode-card:hover { transform: translateY(-4px); border-color: #4a6299; box-shadow: 0 14px 40px rgba(0,0,0,.5); }
+  .mode-card.sel { border-color: #ffd24a; box-shadow: 0 0 22px rgba(255,210,74,.35); }
+  .mode-card .mc-scene { position: absolute; inset: 0; z-index: 0; }
+  .mode-card .mc-scene::after { content: ''; position: absolute; inset: 0;
+    background-image: linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px);
+    background-size: 22px 22px; mask-image: linear-gradient(180deg, transparent, #000 60%); }
+  .mode-card .mc-body { position: relative; z-index: 1; padding: 14px 16px; background: linear-gradient(180deg, transparent, rgba(6,10,20,.92) 70%); }
+  .mode-card .mc-name { font-size: 15px; color: #fff; letter-spacing: 1px; text-shadow: 2px 2px 0 #000; }
+  .mode-card .mc-desc { font-size: 8px; line-height: 1.7; color: #b9c4da; margin-top: 8px; letter-spacing: .3px; }
+  .mode-card .mc-go { display: inline-block; margin-top: 12px; font-size: 9px; letter-spacing: 2px; color: #0c1122; background: linear-gradient(90deg,#ffd24a,#ffb14a); padding: 6px 12px; border-radius: 6px; }
+  .mode-card.sel .mc-go { background: #49c26a; color: #05210f; }
+  /* per-mode stylised "game photo" backdrops (pixel-theme gradients + horizon) */
+  .mode-dm  .mc-scene { background: linear-gradient(180deg,#3a2a5a,#7a3b52 55%,#c98a5a 55%,#8a5a34); }
+  .mode-ctf .mc-scene { background: linear-gradient(180deg,#12325a,#2f6ea0 55%,#8fb56a 55%,#4a6a30); }
+  .mode-gg  .mc-scene { background: linear-gradient(180deg,#1a2340,#3a4a7a 55%,#6a7290 55%,#3a3f52); }
+  .mode-dom .mc-scene { background: linear-gradient(180deg,#40140f,#a63a1f 55%,#5a4030 55%,#2a1a12); }
+  .mode-surv .mc-scene { background: linear-gradient(180deg,#0a1a12,#14402a 55%,#3a5a2a 55%,#1a2a12); }
+  .mode-rounds .mc-scene { background: linear-gradient(180deg,#101426,#2a3350 55%,#7a6a4a 55%,#3a2f22); }
+
+  /* ---- prettier panels: consistent titles + cards ---- */
+  .ltitle { font-size: 13px; letter-spacing: 2px; color: #fff; text-shadow: 2px 2px 0 #000; padding-bottom: 12px; border-bottom: 1px solid #223350; margin-bottom: 6px; }
+  .ltitle .asub { color: #8090ad; font-size: 8px; letter-spacing: .5px; margin-left: 8px; }
+  #careerHdr { font-size: 12px; }
+  .careerbarwrap { height: 14px; border-radius: 8px; }
+  .ptier { border-radius: 12px; }
+  #careerPanel .careertrack { padding: 12px 4px 16px; }
+  #friendsList .frow, #leaderList .lrow { transition: background .15s; }
+  #friendsPanel .fcode, #friendsPanel .fadd { justify-content: center; }
 </style>
 <script>(function(){try{var t=false;try{t=window.self===window.top}catch(e){t=false}if(t){var u=new URL(location.href);if(u.searchParams.has('__raw')){u.searchParams.delete('__raw');location.replace(u.pathname+u.search+u.hash)}}}catch(e){}})()</script></head>
 <body>
@@ -605,8 +653,10 @@
       <div class="logo"><span class="lb1">BLOCK</span><span class="lb2">FIELD</span></div>
       <div id="navtabs">
         <span class="tab active" data-view="play">PLAY</span>
+        <span class="tab" data-view="modes">MODES</span>
         <span class="tab" data-view="career">CAREER</span>
         <span class="tab" data-view="shop">COSMETICS</span>
+        <span class="tab" data-view="friends">FRIENDS</span>
       </div>
       <div id="profileCard">
         <div class="pc-ring"><span id="pcLevel">1</span></div>
@@ -621,8 +671,8 @@
     </div>
 
     <div id="lobby">
-      <div class="pslot ghost"><span>+</span></div>
-      <div class="pslot ghost hide-sm"><span>+</span></div>
+      <div class="pslot ghost invite" data-invite="1"><span>+</span><em>INVITE</em></div>
+      <div class="pslot ghost invite hide-sm" data-invite="1"><span>+</span><em>INVITE</em></div>
       <div id="agentCard" class="pslot card">
         <div class="cardframe">
           <div id="agentArt"></div>
@@ -636,8 +686,8 @@
           </div>
         </div>
       </div>
-      <div class="pslot ghost hide-sm"><span>+</span></div>
-      <div class="pslot ghost"><span>+</span></div>
+      <div class="pslot ghost invite hide-sm" data-invite="1"><span>+</span><em>INVITE</em></div>
+      <div class="pslot ghost invite" data-invite="1"><span>+</span><em>INVITE</em></div>
     </div>
 
     <div id="coinBal"><span class="coin"></span>0</div>
@@ -660,16 +710,13 @@
         </div>
       </div>
       <div class="bside right">
-        <button id="careerBtn" class="linkbtn hot">CAREER</button>
-        <button id="shopBtn" class="linkbtn hot">COSMETICS</button>
-        <button id="inviteBtn" class="linkbtn">INVITE FRIENDS</button>
         <button id="friendsBtn" class="linkbtn">FRIENDS</button>
         <button id="authBtn" class="linkbtn">ACCOUNT</button>
         <button id="leaderBtn" class="linkbtn">LEADERBOARD</button>
         <button id="awardsBtn" class="linkbtn">AWARDS</button>
         <button id="dailyBtn" class="linkbtn">DAILY +100 <span class="coin"></span></button>
-        <div id="dailyMsg" class="dailymsg"></div>
       </div>
+      <div id="dailyMsg" class="dailymsg"></div>
     </div>
 
     <div class="err" id="menuErr"></div>
@@ -705,6 +752,11 @@
     <div id="awardsPanel">
       <div class="ltitle">ACHIEVEMENTS</div>
       <div id="awardsList"></div>
+    </div>
+
+    <div id="modePanel">
+      <div class="ltitle">SELECT GAME MODE <span class="asub">(random map &amp; mixed bots)</span></div>
+      <div id="modeGrid"></div>
     </div>
 
     <div id="careerPanel">
