@@ -534,6 +534,8 @@
   /* in-game inspect label */
   #inspectLbl { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); color: #ffd24a; font-size: 13px; letter-spacing: 2px;
     text-shadow: 2px 2px 0 #000; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #killFlash { position: absolute; inset: 0; pointer-events: none; opacity: 0; mix-blend-mode: screen; transition: opacity .12s ease-out; z-index: 3;
+    background: radial-gradient(ellipse 90% 70% at 50% 50%, transparent 40%, currentColor 130%); }
   .shop-card.equipped { position: relative; overflow: hidden; }
   .shop-card.equipped::after { content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%; transform: skewX(-20deg);
     background: linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent); animation: shimmer 2.6s ease-in-out infinite; }
@@ -739,6 +741,7 @@
     <div id="shieldHud"></div>
     <div id="turretHud"></div>
     <div id="inspectLbl"></div>
+    <div id="killFlash"></div>
     <div id="zoneHud"><span id="zoneTxt"></span><div id="zoneBarWrap"><div id="zoneBar"></div></div></div>
     <div id="waveHud"></div>
     <div id="announce"></div>
@@ -2738,7 +2741,39 @@ function wireSettingsPanel(p) {
   const xs = $$('xhSel'); if (xs) xs.addEventListener('change', () => { xhColor = xs.value; localStorage.setItem('bf_xh', xhColor); applyCrosshair(); refreshSettingInputs(); });
 }
 
-const tracers = [], particles = [], flashes = [], rockets = [], grenades = [], dmgTexts = [];
+const tracers = [], particles = [], flashes = [], rockets = [], grenades = [], dmgTexts = [], killFx = [];
+let camShake = 0; // screen-shake magnitude, decays each frame
+let _ringTex = null;
+function ringTexture() {
+  if (_ringTex) return _ringTex;
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  g.strokeStyle = '#fff'; g.lineWidth = 6; g.beginPath(); g.arc(32, 32, 26, 0, Math.PI * 2); g.stroke();
+  g.lineWidth = 2; g.globalAlpha = 0.6; g.beginPath(); g.arc(32, 32, 15, 0, Math.PI * 2); g.stroke();
+  _ringTex = new THREE.CanvasTexture(c); return _ringTex;
+}
+function textSprite(text, color) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const g = c.getContext('2d');
+  g.font = 'bold 30px monospace'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.lineWidth = 6; g.strokeStyle = '#000'; g.strokeText(text, 128, 32);
+  g.fillStyle = color; g.fillText(text, 128, 32);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthTest: false }));
+  sp.scale.set(2.0, 0.5, 1);
+  return sp;
+}
+// A juicy elimination burst: expanding shockwave ring + skull-coloured fountain
+// + a floating ELIMINATED banner, all tinted by your skin colour.
+function makeKillEffect(pos, colorHex, big) {
+  burst(pos, colorHex, big ? 46 : 30, big ? 9 : 7);
+  burst(pos, 0xffffff, 10, 4);
+  const ring = new THREE.Sprite(new THREE.SpriteMaterial({ map: ringTexture(), color: colorHex, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthTest: false }));
+  ring.position.copy(pos); ring.scale.set(0.5, 0.5, 0.5);
+  scene.add(ring); killFx.push({ obj: ring, ttl: 0.5, max: 0.5, kind: 'ring' });
+  const sp = textSprite(big ? 'ELIMINATED!' : 'ELIMINATED', '#' + (colorHex >>> 0).toString(16).padStart(6, '0'));
+  sp.position.copy(pos); sp.position.y += 0.5;
+  scene.add(sp); killFx.push({ obj: sp, ttl: 1.2, max: 1.2, kind: 'text' });
+}
 function spawnDamageNumber(pos, dmg, head) {
   if (dmgTexts.length > 40) { const d = dmgTexts.shift(); scene.remove(d.obj); d.obj.material.map.dispose(); d.obj.material.dispose(); }
   const c = document.createElement('canvas'); c.width = 64; c.height = 40;
@@ -3218,6 +3253,13 @@ function renderAuth() {
 }
 
 // Leave the current match and go back to the main menu.
+let leavingGame = false;
+function backToMenu() {
+  inGame = false;
+  $('hud').style.display = 'none';
+  $('menu').style.display = 'flex';
+  try { connectLobby(); } catch {}
+}
 function leaveGame() {
   try { document.exitPointerLock(); } catch {}
   hideMatchOver();
@@ -3225,8 +3267,11 @@ function leaveGame() {
   clearTurrets();
   { const wh = $('waveHud'); if (wh) wh.style.display = 'none'; const st = $('scoreTop'); if (st) st.style.display = ''; }
   const ph = $('pauseHint'); if (ph) ph.style.display = 'none';
-  if (ws && (ws.readyState === 0 || ws.readyState === 1)) { try { ws.close(); } catch {} } // onclose returns to the menu
-  else { inGame = false; $('hud').style.display = 'none'; $('menu').style.display = 'flex'; connectLobby(); }
+  leavingGame = true;
+  if (ws && (ws.readyState === 0 || ws.readyState === 1)) { try { ws.close(); } catch {} }
+  // Always return to the menu, even if onclose is slow or never fires.
+  setTimeout(() => { if (inGame) backToMenu(); leavingGame = false; }, 250);
+  if (!ws || ws.readyState > 1) backToMenu();
 }
 
 // ============================================================
@@ -3243,15 +3288,13 @@ function connect(name) {
   ws.onerror = () => { $('menuErr').textContent = 'Failed to connect to the server'; $('playBtn').disabled = false; };
   ws.onclose = () => {
     if (inGame) {
-      inGame = false;
       closeChat();
       closeAllVoice();
       document.exitPointerLock();
-      $('hud').style.display = 'none';
-      $('menu').style.display = 'flex';
-      $('menuErr').textContent = 'Connection lost. Join again!';
       $('playBtn').disabled = false;
-      connectLobby(); // resume friend presence in the menu
+      if (!leavingGame) $('menuErr').textContent = 'Connection lost. Join again!'; // only on a real drop
+      leavingGame = false;
+      backToMenu();
     }
   };
   ws.onmessage = e => {
@@ -3449,8 +3492,11 @@ function handleMsg(m) {
       }
       if (m.killer === myId && m.victim !== myId) {
         me.kills++; matchKills++; SND.kill(); onMyKill();
-        // skin-tinted kill burst at the victim
-        if (victim) { const kp = victim.group.position.clone(); kp.y += 1.0; burst(kp, myTracerColor(SLOTS[me.slot]), 26, 6); }
+        // juicy skin-tinted elimination effect + screen shake (bigger on multi-kills)
+        const kcol = myTracerColor(SLOTS[me.slot]);
+        if (victim) { const kp = victim.group.position.clone(); kp.y += 1.0; makeKillEffect(kp, kcol, multiKill >= 2); }
+        camShake = Math.min(0.5, 0.16 + (multiKill >= 2 ? 0.12 * multiKill : 0));
+        const kf = $('killFlash'); if (kf) { kf.style.color = hx(kcol); kf.style.opacity = multiKill >= 2 ? '0.6' : '0.4'; clearTimeout(kf._t); kf._t = setTimeout(() => kf.style.opacity = '0', 110); }
         if (lastKilledBy && m.victim === lastKilledBy) { // paid them back
           announce('REVENGE!', '#ffd24a'); awardCoins(15); unlockAch('revenge'); lastKilledBy = null;
         }
@@ -4652,6 +4698,13 @@ function updateFx(dt) {
     p.obj.position.addScaledVector(p.vel, dt);
     if (p.ttl <= 0) { scene.remove(p.obj); p.obj.geometry.dispose(); p.obj.material.dispose(); particles.splice(i, 1); }
   }
+  for (let i = killFx.length - 1; i >= 0; i--) {
+    const f = killFx[i]; f.ttl -= dt;
+    const k = 1 - Math.max(0, f.ttl) / f.max;
+    if (f.kind === 'ring') { const s = 0.5 + k * 4.0; f.obj.scale.set(s, s, s); f.obj.material.opacity = (1 - k) * 0.95; }
+    else { f.obj.position.y += dt * 0.9; f.obj.material.opacity = Math.min(1, f.ttl / 0.4); }
+    if (f.ttl <= 0) { scene.remove(f.obj); f.obj.material.map && f.obj.material.map.dispose(); f.obj.material.dispose(); killFx.splice(i, 1); }
+  }
   for (let i = dmgTexts.length - 1; i >= 0; i--) {
     const d = dmgTexts[i];
     d.ttl -= dt;
@@ -4817,7 +4870,7 @@ function updateViewModel(dt, moving) {
   vm.group.position.x += (targetX - vm.group.position.x) * Math.min(1, dt * 12);
   vm.group.position.y = -0.3 + Math.sin(vm.bob) * bobAmt;
   vm.group.position.z = -0.55 + vm.recoil * 0.09;
-  vm.group.rotation.x = vm.recoil * 0.14;
+  vm.group.rotation.set(vm.recoil * 0.14, 0, 0); // reset y/z each frame so inspect offsets don't accumulate (fixes crooked gun)
   vm.group.visible = !me.dead && !(me.zoomed && SLOTS[me.slot] === 'sniper');
   // muzzle flash fade
   if (vm.muzzle) {
@@ -5420,8 +5473,11 @@ function loop() {
     }
 
     camera.rotation.order = 'YXZ';
-    camera.rotation.y = me.ry;
-    camera.rotation.x = me.rx;
+    // screen shake (kills / multi-kills) — a quick decaying jitter on the look
+    camShake = Math.max(0, camShake - dt * 1.6);
+    const sh = camShake * camShake;
+    camera.rotation.y = me.ry + (Math.random() - 0.5) * sh * 0.12;
+    camera.rotation.x = me.rx + (Math.random() - 0.5) * sh * 0.12;
     camera.position.set(me.pos.x, me.pos.y + EYE, me.pos.z);
 
     // fov: zoom / sprint

@@ -534,6 +534,8 @@
   /* in-game inspect label */
   #inspectLbl { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); color: #ffd24a; font-size: 13px; letter-spacing: 2px;
     text-shadow: 2px 2px 0 #000; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #killFlash { position: absolute; inset: 0; pointer-events: none; opacity: 0; mix-blend-mode: screen; transition: opacity .12s ease-out; z-index: 3;
+    background: radial-gradient(ellipse 90% 70% at 50% 50%, transparent 40%, currentColor 130%); }
   .shop-card.equipped { position: relative; overflow: hidden; }
   .shop-card.equipped::after { content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%; transform: skewX(-20deg);
     background: linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent); animation: shimmer 2.6s ease-in-out infinite; }
@@ -739,6 +741,7 @@
     <div id="shieldHud"></div>
     <div id="turretHud"></div>
     <div id="inspectLbl"></div>
+    <div id="killFlash"></div>
     <div id="zoneHud"><span id="zoneTxt"></span><div id="zoneBarWrap"><div id="zoneBar"></div></div></div>
     <div id="waveHud"></div>
     <div id="announce"></div>
