@@ -1,0 +1,14 @@
+# Files kept OUT of the public static-asset bundle (server code, config, tooling).
+# Only the client (index.html, js/*) should be publicly served.
+worker.js
+server.js
+wrangler.toml
+package.json
+package-lock.json
+node_modules
+scripts
+.git
+.gitignore
+.assetsignore
+README.md
+blockfield-offline.html

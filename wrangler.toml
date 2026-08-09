@@ -1,0 +1,22 @@
+# Cloudflare Workers config for Blockfield online multiplayer.
+# Deploy with:  npm install  &&  npx wrangler deploy
+name = "blockfield"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# Serve the client (index.html, js/*) as static assets. Everything that isn't a
+# static file falls through to worker.js (which handles /ws). The .assetsignore
+# file keeps server-side sources out of the public asset bundle.
+[assets]
+directory = "."
+binding = "ASSETS"
+
+# The authoritative realtime server. new_sqlite_classes makes the Durable Object
+# available on the Workers Free plan (it keeps state in memory, no storage used).
+[[durable_objects.bindings]]
+name = "GAME_SERVER"
+class_name = "GameServer"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameServer"]
